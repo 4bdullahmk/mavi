@@ -1,0 +1,5 @@
+# Install a CUDA build of PyTorch separately from the official PyTorch Windows selector.
+# The training command remains offline and uses only an already-cached official model.
+transformers>=4.51,<6
+peft>=0.14,<1
+accelerate>=1.2,<2

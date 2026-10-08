@@ -1,0 +1,196 @@
+name: Release Mavi Windows source candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semantic version, for example 2.0.0-preview.2
+        required: true
+        type: string
+      source_sha:
+        description: Full 40-character commit SHA (blank uses the dispatch commit).
+        required: false
+        type: string
+        default: ''
+      prerelease:
+        description: Mark this GitHub release as a prerelease.
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate_inputs:
+    name: Validate release inputs
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      version: ${{ steps.validate.outputs.version }}
+      source_sha: ${{ steps.validate.outputs.source_sha }}
+      prerelease: ${{ steps.validate.outputs.prerelease }}
+    steps:
+      - name: Validate version and select an immutable commit
+        id: validate
+        env:
+          VERSION_INPUT: ${{ inputs.version }}
+          SOURCE_SHA_INPUT: ${{ inputs.source_sha }}
+          DISPATCH_SHA: ${{ github.sha }}
+          PRERELEASE_INPUT: ${{ inputs.prerelease }}
+        run: |
+          python - <<'PY'
+          import os, re
+
+          version = os.environ["VERSION_INPUT"].strip()
+          # Strict SemVer subset supported by package_source.py: core plus
+          # optional prerelease, without build metadata.
+          semver = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?$")
+          if not semver.fullmatch(version):
+              raise SystemExit("Version must be strict SemVer, such as 2.0.0 or 2.0.0-preview.2.")
+          selected = os.environ["SOURCE_SHA_INPUT"].strip() or os.environ["DISPATCH_SHA"].strip()
+          if not re.fullmatch(r"[0-9a-fA-F]{40}", selected):
+              raise SystemExit("Select a full 40-character commit SHA; branches and tags are not accepted.")
+          prerelease = os.environ["PRERELEASE_INPUT"].strip().lower()
+          if prerelease not in {"true", "false"}:
+              raise SystemExit("The prerelease option must be true or false.")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"version={version}\nsource_sha={selected.lower()}\nprerelease={prerelease}\n")
+          PY
+
+  validate:
+    name: Windows and Linux validation gates
+    needs: validate_inputs
+    uses: ./.github/workflows/validate.yml
+    with:
+      source_sha: ${{ needs.validate_inputs.outputs.source_sha }}
+
+  release:
+    name: Package and publish the validated source
+    needs: [validate_inputs, validate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.validate_inputs.outputs.version }}
+      SOURCE_SHA: ${{ needs.validate_inputs.outputs.source_sha }}
+      PRERELEASE: ${{ needs.validate_inputs.outputs.prerelease }}
+      OUTPUT_DIR: ${{ runner.temp }}/mavi-source-release
+    steps:
+      - name: Check out the exact validated commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate_inputs.outputs.source_sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Recheck source hygiene
+        run: python scripts/check_release.py
+      - name: Create deterministic source ZIP and SHA-256 sidecar
+        run: python scripts/package_source.py . "$OUTPUT_DIR" "$VERSION"
+      - name: Verify checksum and source-only package contents
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib, os, stat, zipfile
+          from pathlib import Path
+
+          version = os.environ["VERSION"]
+          output = Path(os.environ["OUTPUT_DIR"])
+          archive = output / f"Mavi-Windows-{version}.zip"
+          sidecar = archive.with_suffix(archive.suffix + ".sha256")
+          if not archive.is_file() or not sidecar.is_file():
+              raise SystemExit("Expected source ZIP and SHA-256 sidecar were not created.")
+          fields = sidecar.read_text(encoding="ascii").strip().split()
+          digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+          if len(fields) != 2 or fields[0].lower() != digest or fields[1] != archive.name:
+              raise SystemExit("Source ZIP checksum sidecar did not verify.")
+          required = {
+              "Install-Mavi.cmd", "Install-Mavi.ps1", "INSTALL_WITH_CODEX.md", "UPDATING.md",
+              "Start-Mavi.cmd", "Update-Mavi.cmd", "Update-Mavi.py", "portable/server.py",
+              "portable/requirements.txt", "portable/setup_check.py",
+          }
+          blocked_parts = {"data", "outputs", "logs", "models", "training", "adapters", "profiles",
+                           "chats", "datasets", "credentials", "cache", "caches"}
+          blocked_suffixes = {".log", ".db", ".sqlite", ".jsonl", ".pyc", ".gguf", ".safetensors",
+                              ".ckpt", ".pt", ".pem", ".key", ".p12"}
+          with zipfile.ZipFile(archive) as package:
+              members = [item for item in package.infolist() if not item.is_dir()]
+              names = {item.filename.split("/", 1)[-1] for item in members}
+              missing = required - names
+              if missing:
+                  raise SystemExit("Package is missing required installer/runtime files: " + ", ".join(sorted(missing)))
+              for item in members:
+                  parts = set(part.lower() for part in item.filename.split("/"))
+                  mode = (item.external_attr >> 16) & 0xFFFF
+                  file_type = stat.S_IFMT(mode)
+                  if file_type not in (0, stat.S_IFREG):
+                      raise SystemExit("Package contains a link or special file.")
+                  if parts & blocked_parts or Path(item.filename).suffix.lower() in blocked_suffixes:
+                      raise SystemExit("Package contains a user-data, cache, log, credential, or model file.")
+          print(f"Verified source-only package: {archive.name} ({len(members)} files).")
+          PY
+      - name: Prepare release notes from this version's changelog section
+        env:
+          NOTES_PATH: ${{ runner.temp }}/mavi-source-release-notes.md
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          version = os.environ["VERSION"]
+          lines = Path("CHANGELOG.md").read_text(encoding="utf-8").splitlines()
+          start = next((i for i, line in enumerate(lines) if line.startswith("## " + version)), None)
+          if start is None:
+              raise SystemExit("CHANGELOG.md needs a heading for this exact release version.")
+          end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+          section = "\n".join(lines[start:end]).strip()
+          if not section or len(section) > 40_000:
+              raise SystemExit("The changelog section is empty or exceeds the release-note limit.")
+          Path(os.environ["NOTES_PATH"]).write_text(section + "\n", encoding="utf-8")
+          PY
+      - name: Ensure the release tag is unused
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ needs.validate_inputs.outputs.version }}
+        run: |
+          response="$RUNNER_TEMP/mavi-tag-check.txt"
+          if gh api --include "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >"$response" 2>&1; then
+            echo "Release tag already exists; choose a new version."
+            exit 1
+          fi
+          if ! grep -Eiq 'HTTP/[0-9.]+ 404' "$response"; then
+            echo "Could not verify that the release tag is unused; refusing to publish."
+            exit 1
+          fi
+      - name: Upload reviewable candidate artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mavi-Windows-${{ needs.validate_inputs.outputs.version }}
+          path: |
+            ${{ env.OUTPUT_DIR }}/Mavi-Windows-${{ needs.validate_inputs.outputs.version }}.zip
+            ${{ env.OUTPUT_DIR }}/Mavi-Windows-${{ needs.validate_inputs.outputs.version }}.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish GitHub release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          VERSION: ${{ needs.validate_inputs.outputs.version }}
+          SOURCE_SHA: ${{ needs.validate_inputs.outputs.source_sha }}
+          PRERELEASE: ${{ needs.validate_inputs.outputs.prerelease }}
+          OUTPUT_DIR: ${{ env.OUTPUT_DIR }}
+          NOTES_PATH: ${{ runner.temp }}/mavi-source-release-notes.md
+        shell: bash
+        run: |
+          args=()
+          if [[ "$PRERELEASE" == "true" ]]; then args+=(--prerelease); fi
+          gh release create "v$VERSION" \
+            "$OUTPUT_DIR/Mavi-Windows-$VERSION.zip" \
+            "$OUTPUT_DIR/Mavi-Windows-$VERSION.zip.sha256" \
+            --repo "$REPO" --target "$SOURCE_SHA" \
+            --title "Mavi $VERSION" --notes-file "$NOTES_PATH" \
+            "${args[@]}"

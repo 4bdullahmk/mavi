@@ -1,0 +1,1585 @@
+"use strict";
+
+function maviEncodeWav16k(sampleBlocks) {
+  const sampleCount = sampleBlocks.reduce((total, block) => total + block.length, 0);
+  const dataBytes = sampleCount * 2;
+  if (!sampleCount || dataBytes > 0xffffffff - 36) throw new Error("The recording is empty or too large to encode.");
+  const wav = new Uint8Array(44 + dataBytes);
+  const view = new DataView(wav.buffer);
+  const ascii = (offset, value) => { for (let i = 0; i < value.length; i += 1) wav[offset + i] = value.charCodeAt(i); };
+  ascii(0, "RIFF"); view.setUint32(4, 36 + dataBytes, true); ascii(8, "WAVE");
+  ascii(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true); view.setUint32(24, 16000, true); view.setUint32(28, 32000, true);
+  view.setUint16(32, 2, true); view.setUint16(34, 16, true); ascii(36, "data"); view.setUint32(40, dataBytes, true);
+  let offset = 44;
+  for (const block of sampleBlocks) {
+    for (let index = 0; index < block.length; index += 1, offset += 2) view.setInt16(offset, block[index], true);
+  }
+  return wav;
+}
+
+function maviBytesToBase64(bytes) {
+  let result = "";
+  const chunkSize = 48 * 1024;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    result += btoa(String.fromCharCode(...bytes.subarray(offset, Math.min(bytes.length, offset + chunkSize))));
+  }
+  return result;
+}
+
+if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav16k: maviEncodeWav16k, bytesToBase64: maviBytesToBase64 });
+
+(() => {
+  const $ = (selector, root = document) => root.querySelector(selector);
+  const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+  const apiBase = "/api";
+  const onboardingPrompt = $("#summary-prompt-text").textContent.trim();
+  const modes = [
+    { id: "auto", name: "Automatic", icon: "M", cap: "auto", description: "Let Mavi choose the right local workspace" },
+    { id: "chat", name: "Chat", icon: "◌", cap: "chat", description: "Ask questions and work through ideas" },
+    { id: "workers", name: "Agent team", icon: "⋮", cap: "workers", description: "Independent local analysts and a shared review" },
+    { id: "developer", name: "Developer", icon: "⌘", cap: "developer", description: "Inspect and update a code project" },
+    { id: "files", name: "Files", icon: "▤", cap: "files", description: "Create or edit workspace files" },
+    { id: "images", name: "Images", icon: "▧", cap: "images", description: "Generate or edit images" },
+    { id: "3d", name: "3D", icon: "◇", cap: "3d", description: "Create a 3D or CAD artifact" },
+    { id: "browser", name: "Browser", icon: "◎", cap: "browser", description: "Work with a website in the local browser" },
+    { id: "computer", name: "Computer", icon: "▣", cap: "computer", description: "Inspect a local app and propose actions" },
+    { id: "stocks", name: "Stocks", icon: "⌁", cap: "stocks", description: "Analyze supplied market data" },
+    { id: "dictation", name: "Dictation", icon: "♪", cap: "dictation", description: "Transcribe a supported WAV recording" },
+    { id: "improve_mavi", name: "Improve Mavi", icon: "✳", cap: "improve_mavi", description: "Build a local update candidate" }
+  ];
+  const aliases = { images: ["image"], "3d": ["cad", "model3d"], improve_mavi: ["update", "improveMavi"] };
+  const apiModes = { images: "image", "3d": "cad", improve_mavi: "update" };
+  const textExtensions = new Set(["txt", "md", "csv", "json", "html", "css", "js", "py", "swift", "log"]);
+  const imageMimes = new Set(["image/png", "image/jpeg"]);
+  const wavMimes = new Set(["audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave"]);
+  const documentMimes = new Map([
+    ["pdf", new Set(["application/pdf"])],
+    ["docx", new Set(["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/octet-stream"])],
+    ["xlsx", new Set(["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/octet-stream"])],
+    ["pptx", new Set(["application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/octet-stream"])]
+  ]);
+  const documentModes = new Set(["auto", "files", "developer", "workers"]);
+  const maxAttachmentBytes = 10 * 1024 * 1024;
+  const maxRecordingSeconds = 5 * 60;
+  const maxRecordingSamples = 16_000 * maxRecordingSeconds;
+  const maxProfileBytes = 32 * 1024;
+  const maxProfileChars = 4500;
+
+  let state = null;
+  let activeChatId = null;
+  let activeJob = null;
+  let currentMode = "auto";
+  let currentView = "chat";
+  let discordStatusPollTimer = 0;
+  let discordStatusPollGeneration = 0;
+  let discordStatusPollController = null;
+  let discordStatusPollTimedOut = false;
+  let attachments = [];
+  let toastTimer = 0;
+  let localProfileDraft = "";
+  let theme = "system";
+  let discordConfigDirty = false;
+  let recording = null;
+  let agentEventJobId = null;
+  let agentEventByID = new Map();
+  let galleryItems = [];
+
+  function apiModeFor(modeID) { return apiModes[modeID] || modeID; }
+
+  function apiURL(path) {
+    const url = new URL(`${apiBase}${path}`, window.location.href);
+    if (url.origin !== window.location.origin) throw new Error("Mavi only accepts same-origin local requests.");
+    return url;
+  }
+
+  async function request(path, options = {}) {
+    const response = await fetch(apiURL(path), {
+      credentials: "same-origin",
+      cache: "no-store",
+      ...options,
+      headers: { ...(options.body ? { "Content-Type": "application/json" } : {}), ...(options.headers || {}) }
+    });
+    const type = response.headers.get("content-type") || "";
+    const payload = type.includes("application/json") ? await response.json() : await response.text();
+    if (!response.ok) {
+      const message = payload && typeof payload === "object" ? (payload.error || payload.detail || payload.message) : payload;
+      throw new Error(typeof message === "string" && message ? message : `Local request failed (${response.status}).`);
+    }
+    return payload;
+  }
+
+  function post(path, body) {
+    return request(path, { method: "POST", body: JSON.stringify(body) });
+  }
+
+  function showToast(message) {
+    const toast = $("#toast");
+    toast.textContent = String(message || "Done");
+    toast.classList.remove("hidden");
+    window.clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(() => toast.classList.add("hidden"), 3200);
+  }
+
+  function setConnection(online, message) {
+    const dot = $("#connection-dot");
+    dot.classList.toggle("ready", Boolean(online));
+    dot.classList.toggle("offline", !online);
+    $("#connection-label").textContent = message;
+  }
+
+  function capabilityFor(modeID) {
+    if (modeID === "chat") {
+      const reported = state?.capabilities?.chat;
+      if (!reported || typeof reported.available !== "boolean") return { available: false, reason: "Chat readiness has not been reported by the local backend." };
+      return reported;
+    }
+    const mode = modes.find((item) => item.id === modeID);
+    const caps = state?.capabilities || {};
+    const keys = [mode?.cap, ...(aliases[modeID] || [])].filter(Boolean);
+    const capability = keys.map((key) => caps[key]).find((value) => value && typeof value === "object");
+    if (!capability || typeof capability.available !== "boolean") return { available: false, reason: "The local backend has not reported this capability." };
+    return capability;
+  }
+
+  function applyTheme(nextTheme) {
+    theme = ["system", "light", "dark"].includes(nextTheme) ? nextTheme : "system";
+    document.documentElement.dataset.theme = theme;
+    $$("[data-theme-choice]").forEach((button) => button.classList.toggle("active", button.dataset.themeChoice === theme));
+  }
+
+  function renderWorkspaceMenu() {
+    const menu = $("#workspace-menu");
+    menu.replaceChildren();
+    for (const mode of modes) {
+      const capability = capabilityFor(mode.id);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "workspace-option";
+      button.setAttribute("role", "menuitem");
+      button.disabled = !capability.available;
+      button.title = capability.available ? mode.description : (capability.reason || "This capability is not ready on this device.");
+      const icon = document.createElement("span");
+      icon.className = "option-icon";
+      icon.textContent = mode.icon;
+      const detail = document.createElement("span");
+      const name = document.createElement("b");
+      name.textContent = mode.name;
+      const description = document.createElement("small");
+      description.textContent = capability.available ? mode.description : (capability.reason || "Not ready on this device");
+      detail.append(name, description);
+      const status = document.createElement("span");
+      status.className = "option-state";
+      status.textContent = capability.available ? "Ready" : "Unavailable";
+      button.append(icon, detail, status);
+      button.addEventListener("click", () => chooseMode(mode.id));
+      menu.append(button);
+    }
+  }
+
+  function chooseMode(modeID) {
+    const capability = capabilityFor(modeID);
+    if (!capability.available) {
+      showToast(capability.reason || "This capability is not ready on this device.");
+      return;
+    }
+    currentMode = modeID;
+    const mode = modes.find((item) => item.id === modeID) || modes[0];
+    $("#workspace-name").textContent = mode.name;
+    $("#workspace-glyph").textContent = mode.icon;
+    $("#composer-mode-name").textContent = mode.name;
+    closeWorkspaceMenu();
+    $("#composer-input").placeholder = modeID === "chat" ? "Message Mavi…" : `What would you like to do in ${mode.name}?`;
+    renderModelStatus();
+    $("#composer-input").focus();
+  }
+
+  function openWorkspaceMenu() {
+    renderWorkspaceMenu();
+    $("#workspace-menu").classList.remove("hidden");
+    $("#workspace-picker").setAttribute("aria-expanded", "true");
+  }
+
+  function closeWorkspaceMenu() {
+    $("#workspace-menu").classList.add("hidden");
+    $("#workspace-picker").setAttribute("aria-expanded", "false");
+  }
+
+  function renderModelStatus() {
+    const models = Array.isArray(state?.models) ? state.models : [];
+    const ready = capabilityFor(currentMode).available && !(activeJob && !["chat", "browser", "computer"].includes(activeJob.mode));
+    renderAutomationApprovalControls();
+    $("#send-button").disabled = !ready || Boolean(recording);
+    const recordButton = $("#record-button");
+    const dictation = capabilityFor("dictation");
+    recordButton.disabled = !recording && (!dictation.available || Boolean(activeJob));
+    recordButton.title = recording ? "Stop recording" : (dictation.available ? "Record audio locally for dictation" : (dictation.reason || "Dictation is not ready on this device."));
+    const note = $("#composer-note");
+    if (activeJob && !["chat", "browser", "computer"].includes(activeJob.mode)) note.textContent = "A task is already running. Stop it before starting another task.";
+    else if (activeJob) note.textContent = "Send a follow-up to steer this task. Attachments can be used on your next task.";
+    else note.textContent = "Local AI can make mistakes. Review important details.";
+    const indicator = $("#model-indicator");
+    indicator.replaceChildren();
+    const dot = document.createElement("span");
+    dot.className = `status-dot ${ready ? "ready" : "offline"}`;
+    const label = document.createElement("span");
+    const selected = state?.settings?.model;
+    const selectedPresent = selected && models.some((model) => model.name === selected);
+    label.textContent = activeJob ? "Local task running" : ready ? (selectedPresent ? selected : `${models.length} local model${models.length === 1 ? "" : "s"} available`) : "No ready local chat model";
+    indicator.append(dot, label);
+
+    const list = $("#model-list");
+    list.replaceChildren();
+    if (!models.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty-models";
+      empty.textContent = "No local models are reported. Chat and tool workspaces stay unavailable until the backend confirms a ready model.";
+      list.append(empty);
+    } else {
+      for (const item of models) {
+        const row = document.createElement("div");
+        row.className = "model-row";
+        const dot = document.createElement("span");
+        dot.className = "status-dot ready";
+        const name = document.createElement("span");
+        name.className = "model-name";
+        name.textContent = String(item.name || "Local model");
+        const size = document.createElement("span");
+        size.className = "model-size";
+        size.textContent = item.size == null ? "Installed" : formatSize(item.size);
+        row.append(dot, name, size);
+        list.append(row);
+      }
+    }
+
+    const select = $("#model-select");
+    select.replaceChildren();
+    const choose = document.createElement("option");
+    choose.value = "";
+    choose.textContent = models.length ? "Use local default" : "No model available";
+    select.append(choose);
+    for (const item of models) {
+      const option = document.createElement("option");
+      option.value = item.name;
+      option.textContent = String(item.name);
+      select.append(option);
+    }
+    select.value = selected || "";
+    select.disabled = !models.length;
+
+    const hardware = state?.hardware || {};
+    const ram = Number(hardware.ram_gb);
+    const gpuValue = hardware.gpu;
+    const gpu = typeof gpuValue === "string" ? gpuValue.trim() : String(gpuValue?.name || gpuValue?.model || hardware.gpu_name || hardware.gpu_model || "").trim();
+    const vram = Number(hardware.gpu_vram_gb ?? hardware.vram_gb ?? hardware.gpu?.vram_gb);
+    const vramMB = Number(hardware.gpu_vram_mb ?? hardware.vram_mb ?? hardware.gpu?.vram_mb);
+    const bits = [];
+    if (hardware.platform) bits.push(String(hardware.platform));
+    if (Number.isFinite(ram) && ram > 0) bits.push(`${ram} GB memory`);
+    if (gpu) bits.push(gpu);
+    if (Number.isFinite(vram) && vram > 0) bits.push(`${vram} GB VRAM`);
+    else if (Number.isFinite(vramMB) && vramMB > 0) bits.push(`${Math.round(vramMB)} MB VRAM`);
+    const recommendation = "Many local models work best with 32 GB or more of memory and an NVIDIA GPU.";
+    $("#hardware-note").textContent = bits.length ? `Detected device: ${bits.join(" · ")}. ${recommendation} Workspace readiness comes from backend capability checks.` : `Device details are not reported. ${recommendation} Readiness comes from the local backend capability checks.`;
+  }
+
+  function renderAutomationApprovalControls() {
+    const fieldset = $("#automation-approval");
+    const scopeFieldset = $("#automation-scope");
+    if (!fieldset || !scopeFieldset) return;
+    const visible = !activeJob && ["auto", "browser", "computer"].includes(currentMode) && capabilityFor("computer").available;
+    fieldset.classList.toggle("hidden", !visible);
+    scopeFieldset.classList.toggle("hidden", !visible);
+    if (!visible) {
+      const askEach = fieldset.querySelector('input[name="automation-policy"][value="ask_each"]');
+      if (askEach) askEach.checked = true;
+      const singleApp = scopeFieldset.querySelector('input[name="automation-scope"][value="single_app"]');
+      if (singleApp) singleApp.checked = true;
+    }
+  }
+
+  function formatSize(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number) || number <= 0) return String(value);
+    if (number > 1e9) return `${(number / 1e9).toFixed(1)} GB`;
+    if (number > 1e6) return `${(number / 1e6).toFixed(0)} MB`;
+    return `${number} B`;
+  }
+
+  function renderDiscordStatus() {
+    const discord = state?.discord || {};
+    const connected = discord.connected === true;
+    const configured = discord.configured === true;
+    const rawStatus = typeof discord.status === "string" && discord.status ? discord.status : (configured ? (connected ? "Connected" : "Configured · not connected") : "Not configured");
+    const status = discordStatusPollTimedOut && configured && !connected && rawStatus === "Connecting…"
+      ? "Still connecting · refresh status to check again"
+      : rawStatus;
+    $("#discord-nav-state").textContent = connected ? "On" : (configured ? "Ready" : "Off");
+    $("#discord-status").textContent = status;
+    $("#discord-view-title").textContent = configured ? (connected ? "Connected" : "Configured") : "Not configured";
+    $("#discord-view-copy").textContent = status;
+    $("#discord-connection-value").textContent = connected ? "Connected" : (configured ? "Configured, offline" : "Not configured");
+    $("#discord-badge").textContent = connected ? "CONNECTED" : (configured ? "CONFIGURED" : "OPTIONAL");
+  }
+
+  function renderDiscord() {
+    const discord = state?.discord || {};
+    const configured = discord.configured === true;
+    renderDiscordStatus();
+    if (!discordConfigDirty) {
+      $("#discord-enabled").checked = typeof discord.enabled === "boolean" ? discord.enabled : configured;
+      $("#discord-allow-tasks").checked = discord.allow_tasks === true;
+      // Older local backends omit these safe identifiers. Leave the current
+      // fields alone in that case so the setup guide still works in-session.
+      for (const [key, selector] of [["application_id", "#discord-application"], ["channel_id", "#discord-channel"]]) {
+        if (Object.prototype.hasOwnProperty.call(discord, key) && typeof discord[key] === "string") $(selector).value = discord[key];
+      }
+      if (Object.prototype.hasOwnProperty.call(discord, "user_ids") && Array.isArray(discord.user_ids)) $("#discord-users").value = discord.user_ids.filter((id) => typeof id === "string").join(", ");
+    }
+    updateDiscordInviteLink();
+  }
+
+  function updateDiscordInviteLink() {
+    const link = $("#discord-invite-link");
+    if (!link) return;
+    const applicationID = $("#discord-application").value.trim();
+    if (!/^\d{17,20}$/.test(applicationID)) {
+      link.href = "#";
+      link.setAttribute("aria-disabled", "true");
+      link.setAttribute("tabindex", "-1");
+      link.classList.add("disabled-link");
+      return;
+    }
+    const invite = new URL("https://discord.com/oauth2/authorize");
+    invite.search = new URLSearchParams({ client_id: applicationID, permissions: "117760", scope: "bot" }).toString();
+    link.href = invite.href;
+    link.removeAttribute("aria-disabled");
+    link.removeAttribute("tabindex");
+    link.classList.remove("disabled-link");
+  }
+
+  function stopDiscordStatusPoll() {
+    discordStatusPollGeneration += 1;
+    window.clearTimeout(discordStatusPollTimer);
+    discordStatusPollTimer = 0;
+    if (discordStatusPollController) discordStatusPollController.abort();
+    discordStatusPollController = null;
+  }
+
+  function startDiscordStatusPoll() {
+    stopDiscordStatusPoll();
+    discordStatusPollTimedOut = false;
+    renderDiscordStatus();
+    if (!$("#discord-enabled").checked) return;
+    const generation = discordStatusPollGeneration;
+    const deadline = Date.now() + 30_000;
+
+    const poll = async () => {
+      if (generation !== discordStatusPollGeneration || !["settings", "discord"].includes(currentView) || !$("#discord-enabled").checked) {
+        return stopDiscordStatusPoll();
+      }
+      if (Date.now() >= deadline) {
+        discordStatusPollTimedOut = true;
+        renderDiscordStatus();
+        return stopDiscordStatusPoll();
+      }
+      const controller = new AbortController();
+      discordStatusPollController = controller;
+      let requestTimedOut = false;
+      const timeoutMs = Math.max(1, Math.min(8_000, deadline - Date.now()));
+      const requestTimeout = window.setTimeout(() => {
+        requestTimedOut = true;
+        controller.abort();
+      }, timeoutMs);
+      try {
+        const result = await request("/state", { signal: controller.signal });
+        if (generation !== discordStatusPollGeneration || !["settings", "discord"].includes(currentView)) return;
+        if (result && result.discord && typeof result.discord === "object") {
+          // Keep the refresh scoped to status so it cannot replace form drafts,
+          // model selection, chat history, or the intentionally-cleared token field.
+          state = state || {};
+          state.discord = result.discord;
+          renderDiscordStatus();
+          const discord = result.discord;
+          const status = typeof discord.status === "string" ? discord.status : "";
+          if (discord.connected === true || discord.configured !== true || /^Connection stopped:|^Disconnected\b/.test(status)) {
+            return stopDiscordStatusPoll();
+          }
+        }
+      } catch (error) {
+        if (generation !== discordStatusPollGeneration) return;
+        if (error?.name === "AbortError" && !requestTimedOut) return;
+      } finally {
+        window.clearTimeout(requestTimeout);
+        if (discordStatusPollController === controller) discordStatusPollController = null;
+      }
+      if (generation === discordStatusPollGeneration) {
+        if (Date.now() >= deadline) {
+          discordStatusPollTimedOut = true;
+          renderDiscordStatus();
+          stopDiscordStatusPoll();
+        } else {
+          discordStatusPollTimer = window.setTimeout(poll, 3_000);
+        }
+      }
+    };
+
+    discordStatusPollTimer = window.setTimeout(poll, 1_000);
+  }
+
+  function renderChats() {
+    const list = $("#chat-list");
+    list.replaceChildren();
+    const chats = Array.isArray(state?.chats) ? state.chats : [];
+    if (!chats.length) {
+      const empty = document.createElement("div");
+      empty.className = "chat-list-empty";
+      empty.textContent = "Your chats will appear here.";
+      list.append(empty);
+      return;
+    }
+    for (const chat of chats) {
+      const row = document.createElement("div");
+      row.className = `chat-row${chat.id === activeChatId ? " selected" : ""}`;
+      const open = document.createElement("button");
+      open.type = "button";
+      open.className = "chat-open";
+      open.textContent = String(chat.title || "New conversation");
+      open.title = open.textContent;
+      open.addEventListener("click", () => selectChat(chat.id));
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "chat-delete";
+      remove.textContent = "×";
+      remove.title = "Delete this chat";
+      remove.setAttribute("aria-label", `Delete ${open.textContent}`);
+      remove.addEventListener("click", (event) => { event.stopPropagation(); deleteChat(chat.id); });
+      row.append(open, remove);
+      list.append(row);
+    }
+  }
+
+  function renderCurrentChat() {
+    const messages = $("#messages");
+    messages.replaceChildren();
+    const chat = state?.chats?.find((item) => item.id === activeChatId);
+    const items = Array.isArray(chat?.messages) ? chat.messages : [];
+    $("#welcome-state").classList.toggle("hidden", items.length > 0);
+    for (const item of items) appendMessage(item.role, item.content, [], item.status);
+    scrollToBottom();
+  }
+
+  function appendMessage(role, content, files = [], taskStatus = "failed") {
+    const wrapper = document.createElement("article");
+    const normalizedRole = String(role || "").toLowerCase();
+    const isUser = ["user", "you", "human"].includes(normalizedRole);
+    const isTaskStatus = normalizedRole === "task_status";
+    const wrapperClass = isUser ? "user" : (isTaskStatus ? "task-status" : "assistant");
+    wrapper.className = `message ${wrapperClass}`;
+    const avatar = document.createElement("div");
+    avatar.className = "message-avatar";
+    avatar.textContent = isUser ? "Y" : (isTaskStatus ? "!" : "M");
+    const body = document.createElement("div");
+    body.className = "message-body";
+    const label = document.createElement("p");
+    label.className = "message-role";
+    const statusLabel = String(taskStatus || "failed").toLowerCase();
+    label.textContent = isUser ? "You" : (isTaskStatus ? `Task ${statusLabel === "stopped" ? "stopped" : "failed"}` : "Mavi");
+    const text = document.createElement("p");
+    text.className = "message-content";
+    text.textContent = typeof content === "string" ? content : String(content ?? "");
+    body.append(label, text);
+    if (files.length) {
+      const tray = document.createElement("div");
+      tray.className = "message-attachments";
+      for (const file of files) {
+        const pill = document.createElement("span");
+        pill.className = "attachment-pill";
+        pill.textContent = file.name;
+        tray.append(pill);
+      }
+      body.append(tray);
+    }
+    wrapper.append(avatar, body);
+    $("#messages").append(wrapper);
+    $("#welcome-state").classList.add("hidden");
+    scrollToBottom();
+    return text;
+  }
+
+  function showWelcomeIfEmpty() {
+    const chat = state?.chats?.find((item) => item.id === activeChatId);
+    const hasMessages = (chat?.messages || []).length > 0 || $("#messages").children.length > 0;
+    $("#welcome-state").classList.toggle("hidden", hasMessages);
+  }
+
+  function scrollToBottom() {
+    const scroller = $("#message-scroll");
+    requestAnimationFrame(() => { scroller.scrollTop = scroller.scrollHeight; });
+  }
+
+  function selectChat(id) {
+    activeChatId = id;
+    if (activeJob?.chat_id !== id) renderJobArtifacts([]);
+    if (activeJob?.chat_id !== id) renderAgentMap([]);
+    currentView = "chat";
+    setView("chat");
+    renderChats();
+    renderCurrentChat();
+    closeMobileSidebar();
+  }
+
+  function newChat() {
+    activeChatId = null;
+    renderJobArtifacts([]);
+    renderAgentMap([]);
+    currentView = "chat";
+    setView("chat");
+    $("#messages").replaceChildren();
+    $("#welcome-state").classList.remove("hidden");
+    closeMobileSidebar();
+    $("#composer-input").focus();
+  }
+
+  function setView(name) {
+    if (!["settings", "discord"].includes(name)) stopDiscordStatusPoll();
+    currentView = name;
+    $("#chat-view").classList.toggle("hidden", name !== "chat");
+    $("#gallery-view").classList.toggle("hidden", name !== "gallery");
+    $("#settings-view").classList.toggle("hidden", name !== "settings");
+    $("#discord-view").classList.toggle("hidden", name !== "discord");
+    $$(".nav-item[data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === name));
+    closeWorkspaceMenu();
+    if (name === "settings") renderSettings();
+    if (name === "gallery") loadGallery();
+  }
+
+  function renderSettings() {
+    $("#touch-trigger").value = state?.settings?.personal_touch?.trigger || "";
+    $("#touch-message").value = state?.settings?.personal_touch?.message || "";
+    $("#settings-profile").value = String(state?.profile || "").slice(0, maxProfileChars);
+    localProfileDraft = $("#settings-profile").value;
+    updateProfileCount();
+    $("#adapter-status").textContent = "No adapter training starts automatically. Use a separate explicit local action if training is enabled.";
+    renderDiscord();
+    $("#project-path").value = String(state?.settings?.project_path || "");
+    applyTheme(state?.settings?.theme || theme);
+    renderModelStatus();
+  }
+
+  function updateProfileCount() {
+    const text = $("#settings-profile").value;
+    $("#profile-count").textContent = `${text.length.toLocaleString()} / ${maxProfileChars.toLocaleString()} characters`;
+  }
+
+  async function savePreferences(profile, onboarded = Boolean(state?.settings?.onboarded)) {
+    const modelControl = $("#model-select");
+    const modelChoice = modelControl.options.length ? modelControl.value : (state?.settings?.model || "");
+    const payload = {
+      profile: String(profile || "").slice(0, maxProfileChars),
+      model: modelChoice,
+      theme,
+      onboarded
+    };
+    const projectPath = $("#project-path")?.value.trim() || state?.settings?.project_path || "";
+    if (projectPath) payload.project_path = projectPath;
+    await post("/preferences", payload);
+    localStorage.setItem("mavi-onboarded", onboarded ? "1" : "0");
+    if (state) {
+      state.profile = payload.profile;
+      state.settings = { ...(state.settings || {}), model: payload.model, theme, onboarded, ...(payload.project_path ? { project_path: payload.project_path } : {}) };
+    }
+    renderModelStatus();
+  }
+
+  async function loadState({ syncJob = true, first = false } = {}) {
+    try {
+      const result = await request("/state");
+      if (!result || typeof result !== "object") throw new Error("Local backend returned an invalid workspace state.");
+      state = result;
+      theme = result.settings?.theme || theme;
+      applyTheme(theme);
+      const chats = Array.isArray(state.chats) ? state.chats : [];
+      if (activeChatId && !chats.some((chat) => chat.id === activeChatId)) activeChatId = null;
+      if (!activeChatId && chats.length && first) activeChatId = chats[0].id;
+      renderChats();
+      if (first || !$("#messages").children.length) renderCurrentChat();
+      discordStatusPollTimedOut = false;
+      renderDiscord();
+      renderModelStatus();
+      renderWorkspaceMenu();
+      setConnection(true, "Connected to local Mavi");
+      if (syncJob) syncActiveJob(state.active_job);
+      if (first) maybeShowOnboarding();
+      return true;
+    } catch (error) {
+      setConnection(false, "Local backend unavailable");
+      $("#model-indicator").lastElementChild.textContent = "Waiting for local backend";
+      showToast(error.message || "Could not connect to the local backend.");
+      return false;
+    }
+  }
+
+  function maybeShowOnboarding() {
+    const serverFlag = state?.settings?.onboarded;
+    const localFlag = localStorage.getItem("mavi-onboarded") === "1";
+    if (serverFlag === true || (serverFlag == null && localFlag)) return;
+    const dialog = $("#onboarding-dialog");
+    if (!dialog.open) dialog.showModal();
+  }
+
+  function syncActiveJob(job) {
+    if (!job || !job.id) {
+      if (!activeJob) renderJob(null);
+      return;
+    }
+    if (!activeJob || activeJob.id !== job.id) {
+      activeJob = { id: job.id, chat_id: job.chat_id || activeChatId, content: "", status: job.status || "working", progress: job.progress, mode: job.mode || "chat", streamNode: null };
+      renderModelStatus();
+    }
+    renderJob(job);
+    pollJob();
+  }
+
+  function renderJob(job) {
+    const card = $("#job-card");
+    const track = $("#job-progress-track");
+    const bar = $("#job-progress-bar");
+    const spinner = $(".job-spinner", card);
+    if (!job) {
+      card.classList.add("hidden");
+      card.classList.remove("image-generating");
+      track.classList.remove("is-indeterminate");
+      bar.style.width = "0";
+      spinner.classList.add("hidden");
+      return;
+    }
+    card.classList.remove("hidden");
+    const stopping = Boolean(activeJob?.stopping) || String(job.status || "").toLowerCase() === "stopping";
+    const status = stopping ? "Stopping" : String(job.status || "working").replaceAll("_", " ");
+    $("#job-status").textContent = status.charAt(0).toUpperCase() + status.slice(1);
+    const active = !stopping && ["queued", "running", "working"].includes(String(job.status || "working").toLowerCase());
+    const waiting = Boolean(job.question || job.requires_approval) || String(job.status || "").toLowerCase() === "waiting";
+    const imageMode = ["image", "images"].includes(String(job.mode || activeJob?.mode || "").toLowerCase());
+    card.classList.toggle("image-generating", active && !waiting && imageMode);
+    spinner.classList.toggle("hidden", !active || waiting);
+
+    const actualProgress = typeof job.progress_percent === "number" ? job.progress_percent :
+      (typeof job.progress === "number" ? job.progress : null);
+    const hasProgress = typeof actualProgress === "number" && Number.isFinite(actualProgress);
+    track.classList.toggle("is-indeterminate", active && !waiting && !hasProgress);
+    track.setAttribute("aria-valuemin", "0");
+    track.setAttribute("aria-valuemax", "100");
+    if (hasProgress) {
+      const boundedProgress = Math.max(0, Math.min(100, actualProgress));
+      bar.style.width = `${boundedProgress}%`;
+      track.setAttribute("aria-valuenow", String(boundedProgress));
+    } else {
+      bar.style.width = "0";
+      track.removeAttribute("aria-valuenow");
+    }
+
+    let progressText = stopping ? "Waiting for the local task to stop…" :
+      (typeof job.progress === "string" ? job.progress : "Mavi is working on your request locally.");
+    const elapsed = typeof job.elapsed === "number" && Number.isFinite(job.elapsed) && job.elapsed >= 0 ? Math.round(job.elapsed) :
+      (active && !waiting && !stopping && typeof job.started === "number" && Number.isFinite(job.started) ?
+        Math.max(0, Math.floor(Date.now() / 1000 - job.started)) : null);
+    const terminalStatus = String(job.status || "").toLowerCase();
+    if (elapsed !== null && ["complete", "completed", "done", "success", "succeeded"].includes(terminalStatus)) {
+      progressText += ` · finished in ${elapsed}s`;
+    } else if (elapsed !== null && ["failed", "error", "cancelled", "canceled", "stopped"].includes(terminalStatus)) {
+      progressText += ` · after ${elapsed}s`;
+    } else if (elapsed !== null && active && !waiting && !stopping) {
+      progressText += ` · ${elapsed}s elapsed`;
+    }
+    $("#job-progress").textContent = progressText;
+    const jobIsInOpenChat = !job.chat_id || job.chat_id === activeChatId;
+    renderJobArtifacts(jobIsInOpenChat && Array.isArray(job.artifacts) ? job.artifacts : []);
+    if (jobIsInOpenChat) updateAgentMap(job);
+    else renderAgentMap([]);
+    renderJobQuestion(job);
+  }
+
+  function updateAgentMap(job) {
+    if (job?.id && agentEventJobId !== job.id) {
+      agentEventJobId = job.id;
+      agentEventByID = new Map();
+    }
+    if (Array.isArray(job?.agent_events)) {
+      for (const event of job.agent_events) {
+        if (!event || typeof event.agent_id !== "string" || !event.agent_id) continue;
+        if (!agentEventByID.has(event.agent_id) && agentEventByID.size >= 4) continue;
+        agentEventByID.set(event.agent_id, {
+          agent_id: event.agent_id,
+          parent_id: typeof event.parent_id === "string" ? event.parent_id : null,
+          name: typeof event.name === "string" ? event.name.slice(0, 100) : "Agent",
+          model: typeof event.model === "string" ? event.model.slice(0, 140) : "",
+          status: ["pending", "running", "completed", "failed", "stopped"].includes(event.status) ? event.status : "pending",
+          summary: typeof event.summary === "string" ? event.summary.slice(0, 280) : "",
+          time: Number(event.time)
+        });
+      }
+    }
+    renderAgentMap([...agentEventByID.values()]);
+  }
+
+  function renderAgentMap(events) {
+    const details = $("#agent-map");
+    const nodes = $("#agent-map-nodes");
+    nodes.replaceChildren();
+    details.classList.toggle("hidden", events.length === 0);
+    $("#agent-count").textContent = `${events.length} / 4 agents`;
+    const byID = new Map(events.map((event) => [event.agent_id, event]));
+    const sorted = [...events].sort((a, b) => Number(Boolean(a.parent_id)) - Number(Boolean(b.parent_id)));
+    for (const event of sorted) {
+      const card = document.createElement("article");
+      card.className = `agent-node${event.parent_id ? " agent-child" : " agent-root"}`;
+      const top = document.createElement("div");
+      top.className = "agent-node-top";
+      const identity = document.createElement("div");
+      identity.className = "agent-identity";
+      const name = document.createElement("strong");
+      name.textContent = event.name;
+      const role = document.createElement("span");
+      role.textContent = event.parent_id ? "Worker" : "Lead";
+      identity.append(name, role);
+      const status = document.createElement("span");
+      status.className = `agent-status status-${event.status}`;
+      status.textContent = event.status;
+      top.append(identity, status);
+      card.append(top);
+      if (event.model) {
+        const model = document.createElement("p");
+        model.className = "agent-model";
+        model.textContent = event.model;
+        card.append(model);
+      }
+      if (event.parent_id) {
+        const parent = byID.get(event.parent_id);
+        const relation = document.createElement("p");
+        relation.className = "agent-parent";
+        relation.textContent = `Reports to ${parent ? parent.name : `agent ${event.parent_id.slice(0, 8)}`}`;
+        card.append(relation);
+      }
+      if (event.summary) {
+        const summary = document.createElement("p");
+        summary.className = "agent-summary";
+        summary.textContent = event.summary;
+        card.append(summary);
+      }
+      if (Number.isFinite(event.time) && event.time > 0 && event.time < 8_640_000_000_000) {
+        const time = document.createElement("time");
+        time.className = "agent-time";
+        time.dateTime = new Date(event.time * 1000).toISOString();
+        time.textContent = new Date(event.time * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+        card.append(time);
+      }
+      nodes.append(card);
+    }
+  }
+
+  function verifiedArtifactURL(rawURL, name) {
+    if (typeof rawURL !== "string" || !rawURL.startsWith("/api/artifact?")) return null;
+    try {
+      const url = new URL(rawURL, window.location.origin);
+      if (url.origin !== window.location.origin || url.pathname !== "/api/artifact" || url.username || url.password || url.hash || [...url.searchParams.keys()].length !== 1) return null;
+      if (url.searchParams.get("name") !== name) return null;
+      return url.href;
+    } catch { return null; }
+  }
+
+  function renderJobArtifacts(artifacts) {
+    const container = $("#job-artifacts");
+    container.replaceChildren();
+    const safeItems = artifacts.slice(0, 12).filter((item) => item && typeof item.name === "string").map((item) => ({ item, url: verifiedArtifactURL(item.url, item.name) })).filter(({ url }) => url);
+    container.classList.toggle("hidden", safeItems.length === 0);
+    if (!safeItems.length) return;
+    const heading = document.createElement("p");
+    heading.className = "artifact-heading";
+    heading.textContent = "Files from this task";
+    container.append(heading);
+    for (const { item, url } of safeItems) {
+      const row = document.createElement("div");
+      row.className = "artifact-row";
+      const link = document.createElement("a");
+      link.href = url;
+      link.textContent = item.name;
+      link.setAttribute("download", item.name);
+      link.rel = "noopener";
+      const size = document.createElement("span");
+      size.textContent = item.size == null ? "Download" : formatSize(item.size);
+      row.append(link, size);
+      const extension = item.name.split(".").pop().toLowerCase();
+      const mime = String(item.mime || item.content_type || "").toLowerCase();
+      if (["png", "jpg", "jpeg"].includes(extension) && (!mime || imageMimes.has(mime))) {
+        const preview = document.createElement("img");
+        preview.className = "artifact-preview";
+        preview.src = url;
+        preview.alt = `Preview of ${item.name}`;
+        preview.loading = "lazy";
+        row.append(preview);
+      }
+      container.append(row);
+    }
+  }
+
+  async function loadGallery() {
+    const grid = $("#gallery-grid");
+    grid.replaceChildren();
+    const loading = document.createElement("p");
+    loading.className = "gallery-empty";
+    loading.textContent = "Loading local files…";
+    grid.append(loading);
+    try {
+      const result = await request("/artifacts");
+      galleryItems = Array.isArray(result) ? result : (Array.isArray(result?.artifacts) ? result.artifacts : []);
+      renderGallery();
+    } catch (error) {
+      galleryItems = [];
+      grid.replaceChildren();
+      const message = document.createElement("p");
+      message.className = "gallery-empty";
+      message.textContent = error.message || "Could not load generated files.";
+      grid.append(message);
+    }
+  }
+
+  function renderGallery() {
+    const grid = $("#gallery-grid");
+    grid.replaceChildren();
+    const safeItems = galleryItems.slice(0, 500).filter((item) => item && typeof item.name === "string")
+      .map((item) => ({ item, url: verifiedArtifactURL(item.url, item.name) })).filter(({ url }) => url);
+    $("#clear-gallery").disabled = safeItems.length === 0;
+    if (!safeItems.length) {
+      const empty = document.createElement("p");
+      empty.className = "gallery-empty";
+      empty.textContent = "No generated files yet. Files created by Mavi will appear here.";
+      grid.append(empty);
+      return;
+    }
+    for (const { item, url } of safeItems) {
+      const card = document.createElement("article");
+      card.className = "gallery-card";
+      const extension = item.name.split(".").pop().toLowerCase();
+      const mime = String(item.mime || item.content_type || "").toLowerCase();
+      if (["png", "jpg", "jpeg"].includes(extension) && (!mime || imageMimes.has(mime))) {
+        const image = document.createElement("img");
+        image.className = "gallery-preview";
+        image.src = url;
+        image.alt = `Preview of ${item.name}`;
+        image.loading = "lazy";
+        card.append(image);
+      } else {
+        const icon = document.createElement("div");
+        icon.className = "gallery-file-icon";
+        icon.textContent = extension ? extension.slice(0, 6).toUpperCase() : "FILE";
+        card.append(icon);
+      }
+      const name = document.createElement("a");
+      name.className = "gallery-file-name";
+      name.href = url;
+      name.textContent = item.name;
+      name.setAttribute("download", item.name);
+      name.rel = "noopener";
+      card.append(name);
+      const meta = document.createElement("p");
+      meta.className = "gallery-file-meta";
+      meta.textContent = item.size == null ? extension.toUpperCase() : `${extension.toUpperCase()} · ${formatSize(item.size)}`;
+      card.append(meta);
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "quiet-button danger-button gallery-delete";
+      remove.textContent = "Delete";
+      remove.setAttribute("aria-label", `Delete ${item.name}`);
+      remove.addEventListener("click", () => deleteGalleryFiles([item.name], false));
+      card.append(remove);
+      grid.append(card);
+    }
+  }
+
+  async function deleteGalleryFiles(names, all) {
+    const cleanNames = [...new Set(names.filter((name) => typeof name === "string"))];
+    if (!cleanNames.length) return;
+    const confirmation = all ? `Delete all ${cleanNames.length} generated files from this device? This cannot be undone.` : `Delete “${cleanNames[0]}” from this device? This cannot be undone.`;
+    if (!window.confirm(confirmation)) return;
+    try {
+      await post("/artifacts/delete", { names: cleanNames });
+      showToast(all ? "Generated files deleted from this device." : "Generated file deleted from this device.");
+      await loadGallery();
+      await loadState({ syncJob: false });
+    } catch (error) { showToast(error.message || "Could not delete generated files."); }
+  }
+
+  function renderJobQuestion(job) {
+    const container = $("#job-question");
+    const prompt = typeof job.question === "string" ? job.question : (job.question?.text || job.question?.prompt || "");
+    if (!prompt && !job.requires_approval) { container.classList.add("hidden"); container.replaceChildren(); return; }
+    container.classList.remove("hidden");
+    container.replaceChildren();
+    const p = document.createElement("p");
+    p.textContent = String(prompt || "Mavi is asking for your approval before continuing.");
+    container.append(p);
+    const actions = document.createElement("div");
+    actions.className = "job-question-actions";
+    if (job.requires_approval) {
+      const deny = document.createElement("button");
+      deny.className = "quiet-button"; deny.type = "button"; deny.textContent = "Decline";
+      deny.addEventListener("click", () => answerJob("decline"));
+      const approve = document.createElement("button");
+      approve.className = "primary-button"; approve.type = "button"; approve.textContent = "Approve this step";
+      approve.addEventListener("click", () => answerJob("approve"));
+      actions.append(deny, approve);
+    } else {
+      const input = document.createElement("input");
+      input.type = "text"; input.placeholder = "Your answer"; input.setAttribute("aria-label", "Answer Mavi's question");
+      input.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); answerJob(input.value); } });
+      const send = document.createElement("button");
+      send.className = "primary-button"; send.type = "button"; send.textContent = "Send answer";
+      send.addEventListener("click", () => answerJob(input.value));
+      actions.append(input, send);
+    }
+    container.append(actions);
+  }
+
+  function pollJob() {
+    if (!activeJob || activeJob.polling) return;
+    activeJob.polling = true;
+    window.setTimeout(async () => {
+      const jobID = activeJob?.id;
+      if (!jobID) return;
+      try {
+        const result = await request(`/job?id=${encodeURIComponent(jobID)}`);
+        if (!activeJob || activeJob.id !== jobID) return;
+        activeJob.polling = false;
+        activeJob.status = result.status || activeJob.status;
+        activeJob.progress = result.progress;
+        activeJob.mode = result.mode || activeJob.mode || "chat";
+        if (typeof result.content === "string" && result.content) updateStream(result.content);
+        renderJob({ ...result, requires_approval: result.requires_approval === true, question: result.question });
+        const status = String(result.status || "").toLowerCase();
+        if (["complete", "completed", "done", "success", "succeeded"].includes(status)) {
+          if (!activeJob.streamNode && result.content) updateStream(result.content);
+          if (!activeJob.streamNode && result.content) activeJob.streamNode = true;
+          activeJob = null;
+          $("#job-card").classList.add("hidden");
+          renderModelStatus();
+          await loadState({ syncJob: false });
+          renderChats();
+          return;
+        }
+        if (["failed", "error", "cancelled", "canceled", "stopped"].includes(status)) {
+          const message = result.error || result.content || `Task ${status}.`;
+          activeJob = null;
+          $("#job-card").classList.add("hidden");
+          renderModelStatus();
+          showToast(message);
+          await loadState({ syncJob: false });
+          if (activeChatId === result.chat_id) renderCurrentChat();
+          return;
+        }
+        pollJob();
+      } catch (error) {
+        if (activeJob?.id === jobID) {
+          activeJob.polling = false;
+          $("#job-progress").textContent = error.message || "Could not refresh task status.";
+          window.setTimeout(pollJob, 2500);
+        }
+      }
+    }, 1100);
+  }
+
+  function updateStream(content) {
+    if (!activeJob) return;
+    const text = String(content);
+    if (!activeJob.streamNode) activeJob.streamNode = appendMessage("assistant", text);
+    else if (activeJob.streamNode instanceof HTMLElement) activeJob.streamNode.textContent = text;
+    activeJob.content = text;
+  }
+
+  async function answerJob(answer) {
+    if (!activeJob || !String(answer).trim()) return;
+    try {
+      await post("/answer", { job_id: activeJob.id, answer: String(answer).trim() });
+      $("#job-question").classList.add("hidden");
+      showToast("Answer sent to the local task.");
+      pollJob();
+    } catch (error) { showToast(error.message || "Could not send that answer."); }
+  }
+
+  async function stopJob() {
+    if (!activeJob) return;
+    try {
+      await post("/stop", { job_id: activeJob.id });
+      activeJob.status = "stopping";
+      activeJob.stopping = true;
+      renderJob({ ...activeJob, progress: "Waiting for the local task to stop…" });
+    } catch (error) { showToast(error.message || "Could not stop the task."); }
+  }
+
+  async function steerJob(text) {
+    if (!activeJob) return false;
+    const jobID = activeJob.id;
+    await post("/steer", { job_id: jobID, text });
+    appendMessage("user", `Steer task: ${text}`);
+    showToast("Steering sent to the active local task.");
+    return true;
+  }
+
+  function showMaviSurprise(displayText) {
+    if (document.querySelector(".mavi-surprise")) return;
+    const returnFocus = document.activeElement;
+    const dialog = document.createElement("dialog");
+    dialog.className = "mavi-surprise";
+    dialog.setAttribute("aria-label", displayText);
+    const stars = document.createElement("div");
+    stars.className = "mavi-surprise-stars";
+    stars.setAttribute("aria-hidden", "true");
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (!reduced) {
+      // Bounded one-shot CSS particles: no render loop, sound, or model call.
+      for (let burst = 0; burst < 6; burst += 1) {
+        for (let ray = 0; ray < 14; ray += 1) {
+          const spark = document.createElement("i");
+          const angle = ray * Math.PI * 2 / 14;
+          spark.style.setProperty("--x", `${Math.cos(angle) * 110}px`);
+          spark.style.setProperty("--y", `${Math.sin(angle) * 110}px`);
+          spark.style.setProperty("--delay", `${burst * .7}s`);
+          spark.style.left = `${[20, 78, 40, 85, 13, 64][burst]}%`;
+          spark.style.top = `${[25, 30, 72, 70, 63, 18][burst]}%`;
+          stars.append(spark);
+        }
+      }
+    }
+    const message = document.createElement("div");
+    message.className = "mavi-surprise-message";
+    const overline = document.createElement("p");
+    overline.textContent = "A LITTLE SOMETHING, JUST FOR YOU";
+    const title = document.createElement("h1");
+    title.textContent = displayText;
+    const close = document.createElement("button");
+    close.className = "quiet-button";
+    close.textContent = "Close";
+    message.append(overline, title, close);
+    dialog.append(stars, message);
+    document.body.append(dialog);
+    const dismiss = () => dialog.close();
+    const timer = window.setTimeout(dismiss, 8500);
+    close.addEventListener("click", dismiss);
+    dialog.addEventListener("close", () => {
+      window.clearTimeout(timer);
+      dialog.remove();
+      if (returnFocus?.isConnected) returnFocus.focus();
+    }, { once: true });
+    dialog.showModal();
+  }
+
+  async function sendMessage() {
+    const input = $("#composer-input");
+    const text = input.value.trim();
+    if (!text && !attachments.length) return;
+    if (recording) { showToast("Stop the microphone recording before sending."); return; }
+    const personalTouch = state?.settings?.personal_touch;
+    const normalizeTouch = (value) => String(value || "").trim().replace(/[.!…]+$/, "").replace(/\s+/g, " ").toLocaleLowerCase();
+    if (personalTouch?.trigger && personalTouch?.message && normalizeTouch(text) === normalizeTouch(personalTouch.trigger)) {
+      input.value = "";
+      resizeComposer();
+      showMaviSurprise(personalTouch.message);
+      return;
+    }
+    const capability = capabilityFor(currentMode);
+    if (!capability.available) { showToast(capability.reason || "This workspace is not ready."); return; }
+    if (activeJob) {
+      if (activeJob.mode && !["chat", "browser", "computer"].includes(activeJob.mode)) { showToast("A task is already running. Stop it before starting another task."); return; }
+      if (!text) { showToast("Add a short instruction to steer the active task."); return; }
+      if (attachments.length) { showToast("Active task steering accepts text only. Keep the attachments for your next task."); return; }
+      try { await steerJob(text); input.value = ""; resizeComposer(); }
+      catch (error) { showToast(error.message || "Could not steer the active task."); }
+      return;
+    }
+    const requestText = text || (currentMode === "dictation" ? "Please transcribe the attached audio recording." : "Please review the attached files.");
+    const sentFiles = attachments.map(({ name, text: content, data_base64, mime }) => ({ name, ...(typeof content === "string" ? { text: content } : {}), ...(data_base64 ? { data_base64, mime } : {}) }));
+    const wasNew = !activeChatId;
+    appendMessage("user", requestText, attachments);
+    if (wasNew) {
+      const optimistic = { id: `pending-${Date.now()}`, title: (requestText || attachments[0]?.name || "New conversation").slice(0, 70), messages: [] };
+      activeChatId = optimistic.id;
+      state = state || {};
+      state.chats = [optimistic, ...(state.chats || [])];
+    }
+    const draftChatID = activeChatId;
+    input.value = ""; resizeComposer(); clearAttachments(); renderChats();
+    try {
+      const approvalControl = $("#automation-approval");
+      const approvalChoice = approvalControl && !approvalControl.classList.contains("hidden")
+        ? (approvalControl.querySelector('input[name="automation-policy"]:checked')?.value || "ask_each")
+        : null;
+      const scopeControl = $("#automation-scope");
+      const scopeChoice = scopeControl && !scopeControl.classList.contains("hidden")
+        ? (scopeControl.querySelector('input[name="automation-scope"]:checked')?.value || "single_app")
+        : null;
+      const payload = { chat_id: wasNew ? null : draftChatID, text: requestText, attachments: sentFiles, mode: apiModeFor(currentMode) };
+      if (approvalChoice) payload.automation_policy = approvalChoice;
+      if (scopeChoice) payload.automation_scope = scopeChoice;
+      const result = await post("/chat", payload);
+      if (result.chat_id) {
+        activeChatId = result.chat_id;
+        const optimistic = state?.chats?.find((chat) => chat.id === draftChatID);
+        if (optimistic) optimistic.id = result.chat_id;
+      }
+      if (!result.job_id) throw new Error("The local backend accepted no job ID; nothing can be tracked yet.");
+      if (approvalControl) {
+        const askEach = approvalControl.querySelector('input[name="automation-policy"][value="ask_each"]');
+        if (askEach) askEach.checked = true;
+      }
+      if (scopeControl) {
+        const singleApp = scopeControl.querySelector('input[name="automation-scope"][value="single_app"]');
+        if (singleApp) singleApp.checked = true;
+      }
+      activeJob = { id: result.job_id, chat_id: result.chat_id || activeChatId, status: "working", mode: apiModeFor(currentMode), streamNode: null, content: "", polling: false };
+      renderModelStatus();
+      renderChats();
+      renderJob({ status: "working", mode: activeJob.mode });
+      pollJob();
+    } catch (error) {
+      if (wasNew) {
+        state.chats = (state.chats || []).filter((chat) => chat.id !== draftChatID);
+        activeChatId = null;
+      }
+      renderChats(); showWelcomeIfEmpty();
+      showToast(error.message || "Could not send the request to the local backend.");
+    }
+  }
+
+  async function handleAttachmentFiles(files) {
+    for (const file of files) {
+      if (attachments.length >= 6) { showToast("Attach up to 6 files per message."); break; }
+      const extension = file.name.split(".").pop().toLowerCase();
+      const isText = textExtensions.has(extension);
+      const isImage = imageMimes.has(file.type) && ["png", "jpg", "jpeg"].includes(extension);
+      const isWav = wavMimes.has(file.type) && extension === "wav";
+      const allowedDocumentMimes = documentMimes.get(extension);
+      const isDocument = Boolean(allowedDocumentMimes && allowedDocumentMimes.has(file.type));
+      if (!isText && !isImage && !isWav && !isDocument) { showToast(`${file.name}: choose supported text, PNG/JPEG, WAV, PDF, DOCX, XLSX, or PPTX files.`); continue; }
+      if (isDocument && !documentModes.has(currentMode)) { showToast(`${file.name}: switch to Automatic, Files, Developer, or Agent team to attach documents.`); continue; }
+      if (file.size > maxAttachmentBytes) { showToast(`${file.name}: keep each attachment under 10 MB.`); continue; }
+      if (attachments.reduce((sum, item) => sum + (item.size || 0), 0) + file.size > maxAttachmentBytes) { showToast("Keep all attachments under 10 MB total."); continue; }
+      try {
+        if (isText) {
+          const content = await file.text();
+          if (content.includes("\u0000")) { showToast(`${file.name}: the file does not appear to be plain text.`); continue; }
+          if (content.length > 50_000) { showToast(`${file.name}: text attachments are limited to 50,000 characters.`); continue; }
+          attachments.push({ name: file.name, text: content, size: file.size });
+        } else {
+          const dataURL = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result || ""));
+            reader.onerror = () => reject(new Error("File read failed"));
+            reader.readAsDataURL(file);
+          });
+          const encoded = String(dataURL).split(",", 2)[1] || "";
+          attachments.push({ name: file.name, mime: file.type, data_base64: encoded, size: file.size });
+        }
+      } catch { showToast(`Could not read ${file.name}.`); }
+    }
+    $("#attachment-input").value = "";
+    renderAttachments();
+  }
+
+  function renderAttachments() {
+    const strip = $("#attachment-strip");
+    strip.replaceChildren();
+    strip.classList.toggle("hidden", attachments.length === 0);
+    attachments.forEach((file, index) => {
+      const pill = document.createElement("div"); pill.className = "queued-file";
+      const name = document.createElement("span"); name.textContent = file.name;
+      const remove = document.createElement("button"); remove.type = "button"; remove.textContent = "×"; remove.setAttribute("aria-label", `Remove ${file.name}`);
+      remove.addEventListener("click", () => { attachments.splice(index, 1); renderAttachments(); });
+      pill.append(name, remove); strip.append(pill);
+    });
+  }
+
+  function clearAttachments() { attachments = []; renderAttachments(); }
+
+  function resizeComposer() {
+    const input = $("#composer-input");
+    input.style.height = "auto";
+    input.style.height = `${Math.min(input.scrollHeight, 180)}px`;
+  }
+
+  async function deleteChat(chatID) {
+    const chat = state?.chats?.find((item) => item.id === chatID);
+    if (!window.confirm(`Delete “${chat?.title || "this chat"}” from this local workspace?`)) return;
+    try {
+      await post("/chat/delete", { chat_id: chatID });
+      if (activeChatId === chatID) activeChatId = null;
+      await loadState({ syncJob: false });
+      renderCurrentChat();
+      showToast("Chat deleted from this workspace.");
+    } catch (error) { showToast(error.message || "Could not delete this chat."); }
+  }
+
+  async function clearHistory() {
+    if (!window.confirm("Clear all chats from this local workspace? This cannot be undone.")) return;
+    try {
+      await post("/clear-history", {});
+      activeChatId = null;
+      await loadState({ syncJob: false });
+      renderCurrentChat();
+      showToast("Chat history cleared.");
+    } catch (error) { showToast(error.message || "Could not clear chat history."); }
+  }
+
+  async function saveSettingsProfile() {
+    const value = $("#settings-profile").value;
+    if (value.length > maxProfileChars) { showToast("Keep saved preferences under 4,500 characters."); return; }
+    try { await savePreferences(value, Boolean(state?.settings?.onboarded)); showToast("Local preferences saved."); }
+    catch (error) { showToast(error.message || "Could not save preferences."); }
+  }
+
+  async function saveDiscordSettings() {
+    stopDiscordStatusPoll();
+    const token = $("#discord-token").value.trim();
+    const channelID = $("#discord-channel").value.trim();
+    const users = $("#discord-users").value.split(",").map((item) => item.trim()).filter(Boolean);
+    const applicationID = $("#discord-application").value.trim();
+    const payload = { application_id: applicationID, channel_id: channelID, user_ids: users, enabled: $("#discord-enabled").checked, allow_tasks: $("#discord-allow-tasks").checked };
+    if (token) payload.token = token;
+    $("#discord-token").value = "";
+    try {
+      await post("/discord", payload);
+      discordConfigDirty = false;
+      await loadState({ syncJob: false });
+      if ($("#discord-enabled").checked) startDiscordStatusPoll();
+      showToast(payload.enabled
+        ? "Discord settings saved. Checking the connection… Re-enter your token after Mavi restarts."
+        : "Connection details saved on this device. Discord access is off.");
+    } catch (error) { showToast(error.message || "Could not save Discord settings."); }
+  }
+
+  function setOnboardingError(message) {
+    const error = $("#onboarding-error");
+    error.textContent = message;
+    error.classList.toggle("hidden", !message);
+  }
+
+  async function completeCleanOnboarding() {
+    try {
+      await savePreferences("", true);
+      showDiscordOnboarding();
+    } catch (error) { setOnboardingError(error.message || "Could not save onboarding choice."); }
+  }
+
+  async function completePersonalOnboarding() {
+    const profile = $("#onboarding-profile").value.trim();
+    if (!profile) { setOnboardingError("Add or import a preference summary, or choose Continue clean."); return; }
+    if (profile.length > maxProfileChars) { setOnboardingError("Keep the summary at or under 4,500 characters."); return; }
+    try {
+      await savePreferences(profile, true);
+      showDiscordOnboarding();
+    } catch (error) { setOnboardingError(error.message || "Could not save local preferences."); }
+  }
+
+  async function importOnboardingProfile(file) {
+    setOnboardingError("");
+    if (!file) return;
+    const extension = file.name.split(".").pop().toLowerCase();
+    if (!["txt", "md"].includes(extension)) { setOnboardingError("Choose a .txt or .md file."); return; }
+    if (file.size > maxProfileBytes) { setOnboardingError("Choose a file no larger than 32 KB."); return; }
+    try {
+      const bytes = await file.arrayBuffer();
+      if (bytes.byteLength > maxProfileBytes) { setOnboardingError("The file grew beyond the 32 KB limit. Choose a smaller text file."); return; }
+      const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      $("#onboarding-profile").value = text;
+      $("#import-name").textContent = file.name;
+      updateOnboardingCount();
+      if (text.length > maxProfileChars) setOnboardingError("The preview is longer than 4,500 characters. Edit it before saving.");
+    } catch { setOnboardingError("The selected file must be UTF-8 text."); }
+  }
+
+  function updateOnboardingCount() {
+    const value = $("#onboarding-profile").value;
+    $("#onboarding-char-count").textContent = `${value.length.toLocaleString()} / ${maxProfileChars.toLocaleString()}`;
+    $("#save-preferences").disabled = !value.trim() || value.length > maxProfileChars;
+    if (value.length <= maxProfileChars && $("#onboarding-error").textContent.includes("4,500 characters")) setOnboardingError("");
+  }
+
+  function openPersonalizeStep() {
+    $("#onboarding-clean-step").classList.add("hidden");
+    $("#onboarding-personalize-step").classList.remove("hidden");
+    $("#onboarding-dialog").setAttribute("aria-labelledby", "onboarding-personalize-title");
+    $("#onboarding-profile").focus();
+  }
+
+  function showDiscordOnboarding() {
+    $("#onboarding-clean-step").classList.add("hidden");
+    $("#onboarding-personalize-step").classList.add("hidden");
+    $("#onboarding-discord-step").classList.remove("hidden");
+    $("#onboarding-dialog").setAttribute("aria-labelledby", "onboarding-discord-title");
+    const dialog = $("#onboarding-dialog");
+    if (!dialog.open) dialog.showModal();
+  }
+
+  function finishDiscordOnboarding(openSetup = false) {
+    const dialog = $("#onboarding-dialog");
+    if (dialog.open) dialog.close();
+    if (openSetup) setView("discord");
+  }
+
+  function openCleanStep() {
+    $("#onboarding-personalize-step").classList.add("hidden");
+    $("#onboarding-clean-step").classList.remove("hidden");
+    $("#onboarding-dialog").setAttribute("aria-labelledby", "onboarding-title");
+    setOnboardingError("");
+  }
+
+  async function saveSelectedModel() {
+    try { await savePreferences(state?.profile || "", Boolean(state?.settings?.onboarded)); showToast("Preferred local model saved."); }
+    catch (error) { showToast(error.message || "Could not save model preference."); }
+  }
+
+  async function saveProjectPath() {
+    const path = $("#project-path").value.trim();
+    if (!path) { showToast("Enter an existing local project folder path."); return; }
+    try {
+      const modelControl = $("#model-select");
+      await post("/preferences", { profile: String(state?.profile || "").slice(0, maxProfileChars), model: modelControl.value || state?.settings?.model || "", theme, onboarded: Boolean(state?.settings?.onboarded), project_path: path });
+      if (state) state.settings = { ...(state.settings || {}), project_path: path };
+      showToast("Developer folder saved on this device.");
+    } catch (error) { showToast(error.message || "Could not save the project folder."); }
+  }
+
+  function elapsedLabel(milliseconds) {
+    const seconds = Math.max(0, Math.floor(milliseconds / 1000));
+    return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+  }
+
+  function refreshRecordingLabel() {
+    if (!recording) return;
+    const elapsed = Date.now() - recording.startedAt;
+    $("#record-label").textContent = `Stop · ${elapsedLabel(elapsed)} / 05:00`;
+    if (elapsed >= maxRecordingSeconds * 1000) stopMicrophoneRecording();
+  }
+
+  function releaseRecorder(rec) {
+    if (rec.processor) { rec.processor.onaudioprocess = null; try { rec.processor.disconnect(); } catch {} }
+    if (rec.source) { try { rec.source.disconnect(); } catch {} }
+    if (rec.stream) for (const track of rec.stream.getTracks()) track.stop();
+    if (rec.timer) window.clearInterval(rec.timer);
+    if (rec.context && rec.context.state !== "closed") rec.context.close().catch(() => {});
+  }
+
+  async function startMicrophoneRecording() {
+    const capability = capabilityFor("dictation");
+    if (!capability.available) { showToast(capability.reason || "Dictation is not ready on this device."); return; }
+    if (activeJob) { showToast("Stop the active task before recording dictation."); return; }
+    if (attachments.length) { showToast("Send or remove the queued files before recording dictation."); return; }
+    if (!navigator.mediaDevices?.getUserMedia || typeof AudioContext === "undefined") {
+      showToast("Local microphone recording is unavailable in this browser. Use a supported WAV file instead."); return;
+    }
+    const button = $("#record-button");
+    button.disabled = true;
+    let acquiredStream = null;
+    let audioContext = null;
+    try {
+      acquiredStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      if (!capabilityFor("dictation").available) { for (const track of acquiredStream.getTracks()) track.stop(); return; }
+      audioContext = new AudioContext();
+      const source = audioContext.createMediaStreamSource(acquiredStream);
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      const rec = { stream: acquiredStream, context: audioContext, source, processor, chunks: [], sampleCount: 0, inputFrames: 0, nextSourceFrame: 0, startedAt: Date.now(), stopping: false, timer: 0 };
+      const step = audioContext.sampleRate / 16000;
+      processor.onaudioprocess = (event) => {
+        if (recording !== rec || rec.stopping) return;
+        const input = event.inputBuffer.getChannelData(0);
+        const startFrame = rec.inputFrames;
+        const endFrame = startFrame + input.length;
+        const output = [];
+        while (rec.nextSourceFrame + 1 < endFrame && rec.sampleCount + output.length < maxRecordingSamples) {
+          const local = rec.nextSourceFrame - startFrame;
+          const index = Math.floor(local);
+          const fraction = local - index;
+          const sample = input[index] + (input[index + 1] - input[index]) * fraction;
+          const clamped = Math.max(-1, Math.min(1, sample));
+          output.push(Math.round(clamped < 0 ? clamped * 32768 : clamped * 32767));
+          rec.nextSourceFrame += step;
+        }
+        rec.inputFrames = endFrame;
+        if (output.length) {
+          rec.chunks.push(Int16Array.from(output));
+          rec.sampleCount += output.length;
+        }
+        try { event.outputBuffer.getChannelData(0).fill(0); } catch {}
+        if (rec.sampleCount >= maxRecordingSamples) stopMicrophoneRecording();
+      };
+      source.connect(processor);
+      processor.connect(context.destination);
+      recording = rec;
+      for (const track of acquiredStream.getAudioTracks()) track.addEventListener("ended", () => { if (recording === rec) stopMicrophoneRecording(); }, { once: true });
+      button.classList.add("is-recording");
+      button.setAttribute("aria-label", "Stop microphone recording");
+      rec.timer = window.setInterval(refreshRecordingLabel, 250);
+      refreshRecordingLabel();
+      renderModelStatus();
+    } catch (error) {
+      if (recording) { const rec = recording; recording = null; releaseRecorder(rec); }
+      else {
+        if (acquiredStream) for (const track of acquiredStream.getTracks()) track.stop();
+        if (audioContext && audioContext.state !== "closed") audioContext.close().catch(() => {});
+      }
+      button.classList.remove("is-recording");
+      $("#record-label").textContent = "Dictate";
+      button.setAttribute("aria-label", "Record a local dictation");
+      renderModelStatus();
+      showToast(error?.name === "NotAllowedError" ? "Microphone permission was not granted. Mavi did not record audio." : (error.message || "Could not start local microphone recording."));
+    } finally {
+      if (!recording) renderModelStatus();
+    }
+  }
+
+  async function stopMicrophoneRecording({ discard = false } = {}) {
+    const rec = recording;
+    if (!rec || rec.stopping) return;
+    rec.stopping = true;
+    recording = null;
+    releaseRecorder(rec);
+    const button = $("#record-button");
+    button.classList.remove("is-recording");
+    button.setAttribute("aria-label", "Record a local dictation");
+    $("#record-label").textContent = "Dictate";
+    renderModelStatus();
+    if (discard) return;
+    try {
+      if (!rec.sampleCount) { showToast("No microphone audio was captured."); return; }
+      const wav = maviEncodeWav16k(rec.chunks);
+      if (wav.byteLength > maxAttachmentBytes || attachments.length) { showToast("The recording could not be queued within the 10 MB attachment limit."); return; }
+      attachments.push({ name: "dictation.wav", mime: "audio/wav", data_base64: maviBytesToBase64(wav), size: wav.byteLength });
+      renderAttachments();
+      chooseMode("dictation");
+      showToast("Recording is ready. Review the request and press Send to transcribe locally.");
+    } catch (error) { showToast(error.message || "Could not encode the recording as WAV."); }
+  }
+
+  function discardRecordingOnExit() {
+    if (!recording) return;
+    const rec = recording;
+    recording = null;
+    releaseRecorder(rec);
+  }
+
+  async function saveThemeChoice(nextTheme) {
+    applyTheme(nextTheme);
+    try { await savePreferences(state?.profile || "", Boolean(state?.settings?.onboarded)); }
+    catch (error) { showToast(error.message || "Could not save appearance preference."); }
+  }
+
+  function toggleSidebar(open) {
+    $("#sidebar").classList.toggle("open", open);
+    $("#mobile-scrim").classList.toggle("hidden", !open);
+  }
+
+  function closeMobileSidebar() { toggleSidebar(false); }
+
+  function wireEvents() {
+    $("#workspace-picker").addEventListener("click", () => $("#workspace-menu").classList.contains("hidden") ? openWorkspaceMenu() : closeWorkspaceMenu());
+    $("#composer-mode-chip").addEventListener("click", openWorkspaceMenu);
+    document.addEventListener("click", (event) => { if (!$(".workspace-picker-wrap").contains(event.target)) closeWorkspaceMenu(); });
+    $("#menu-toggle").addEventListener("click", () => toggleSidebar(true));
+    $("#sidebar-close").addEventListener("click", closeMobileSidebar);
+    $("#mobile-scrim").addEventListener("click", closeMobileSidebar);
+    $("#new-chat").addEventListener("click", newChat);
+    $$(".nav-item[data-view]").forEach((button) => button.addEventListener("click", () => { setView(button.dataset.view); closeMobileSidebar(); }));
+    $("#open-settings").addEventListener("click", () => setView("settings"));
+    $("#refresh-state").addEventListener("click", () => loadState({ syncJob: false }));
+    $("#refresh-models").addEventListener("click", () => loadState({ syncJob: false }));
+    $("#refresh-gallery").addEventListener("click", loadGallery);
+    $("#clear-gallery").addEventListener("click", () => deleteGalleryFiles(galleryItems.map((item) => item?.name).filter((name) => typeof name === "string"), true));
+    $("#theme-cycle").addEventListener("click", () => saveThemeChoice(theme === "system" ? "dark" : theme === "dark" ? "light" : "system"));
+    $$("[data-theme-choice]").forEach((button) => button.addEventListener("click", () => saveThemeChoice(button.dataset.themeChoice)));
+    $("#model-select").addEventListener("change", saveSelectedModel);
+    $("#composer-form").addEventListener("submit", (event) => { event.preventDefault(); sendMessage(); });
+    $("#composer-input").addEventListener("input", resizeComposer);
+    $("#composer-input").addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); sendMessage(); }
+    });
+    $("#attach-button").addEventListener("click", () => $("#attachment-input").click());
+    $("#attachment-input").addEventListener("change", (event) => handleAttachmentFiles([...event.target.files]));
+    $("#record-button").addEventListener("click", () => recording ? stopMicrophoneRecording() : startMicrophoneRecording());
+    window.addEventListener("beforeunload", discardRecordingOnExit);
+    window.addEventListener("pagehide", discardRecordingOnExit);
+    $$(".suggestion").forEach((button) => button.addEventListener("click", () => { $("#composer-input").value = button.dataset.prompt || ""; resizeComposer(); $("#composer-input").focus(); }));
+    $("#stop-job").addEventListener("click", stopJob);
+    $("#clear-history").addEventListener("click", clearHistory);
+    $("#clear-history-settings").addEventListener("click", clearHistory);
+    $("#settings-profile").addEventListener("input", updateProfileCount);
+    $("#save-settings-profile").addEventListener("click", saveSettingsProfile);
+    $("#save-personal-touch").addEventListener("click", async () => {
+      const touch = { trigger: $("#touch-trigger").value, message: $("#touch-message").value };
+      try {
+        await post("/personal-touch", touch);
+        state.settings.personal_touch = touch;
+        showToast("Personal touch saved only in this local workspace.");
+      } catch (error) { showToast(error.message || "Could not save personal touch."); }
+    });
+    $("#import-personal-touch").addEventListener("click", () => $("#touch-file").click());
+    $("#touch-file").addEventListener("change", async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+      try {
+        if (file.size > 16000) throw new Error("Choose a small personal-touch JSON file.");
+        const touch = JSON.parse(await file.text());
+        if (typeof touch?.trigger !== "string" || typeof touch?.message !== "string" || touch.trigger.length > 80 || touch.message.length > 80) throw new Error("This file needs trigger and message text, up to 80 characters each.");
+        $("#touch-trigger").value = touch.trigger;
+        $("#touch-message").value = touch.message;
+        showToast("Review the imported text, then save it locally.");
+      } catch (error) { showToast(error.message || "Could not read personal touch."); }
+      event.target.value = "";
+    });
+    $("#save-discord").addEventListener("click", saveDiscordSettings);
+    ["#discord-application", "#discord-channel", "#discord-users", "#discord-enabled", "#discord-allow-tasks"].forEach((selector) => {
+      $(selector).addEventListener("input", () => { discordConfigDirty = true; updateDiscordInviteLink(); });
+      $(selector).addEventListener("change", () => { discordConfigDirty = true; updateDiscordInviteLink(); });
+    });
+    $("#discord-enabled").addEventListener("change", () => {
+      if (!$("#discord-enabled").checked) stopDiscordStatusPoll();
+    });
+    $("#save-project-path").addEventListener("click", saveProjectPath);
+    $("#discord-open-settings").addEventListener("click", () => { setView("settings"); $("#discord-application").focus(); });
+    $("#discord-open-guide").addEventListener("click", () => setView("discord"));
+    $("#connect-discord-onboarding").addEventListener("click", () => finishDiscordOnboarding(true));
+    $("#skip-discord-onboarding").addEventListener("click", () => finishDiscordOnboarding(false));
+    $("#continue-clean").addEventListener("click", completeCleanOnboarding);
+    $("#personalize-clean").addEventListener("click", completeCleanOnboarding);
+    $("#start-personalize").addEventListener("click", openPersonalizeStep);
+    $("#back-onboarding").addEventListener("click", openCleanStep);
+    $("#copy-summary-prompt").addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(onboardingPrompt); $("#copy-summary-prompt").textContent = "Copied"; }
+      catch { setOnboardingError("Clipboard access is unavailable. Select and copy the prompt text above."); }
+    });
+    $("#import-profile").addEventListener("click", () => $("#profile-file").click());
+    $("#profile-file").addEventListener("change", (event) => importOnboardingProfile(event.target.files[0]));
+    $("#onboarding-profile").addEventListener("input", updateOnboardingCount);
+    $("#save-preferences").addEventListener("click", completePersonalOnboarding);
+    $("#onboarding-dialog").addEventListener("cancel", (event) => {
+      if (!$("#onboarding-discord-step").classList.contains("hidden")) return;
+      event.preventDefault();
+      showToast("Choose Continue clean or Personalize to finish setup.");
+    });
+    document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeWorkspaceMenu(); });
+  }
+
+  async function start() {
+    applyTheme("system");
+    wireEvents();
+    const loaded = await loadState({ syncJob: true, first: true });
+    if (loaded) {
+      if (capabilityFor(currentMode).available) chooseMode(currentMode);
+      const chats = Array.isArray(state?.chats) ? state.chats : [];
+      if (!activeChatId && chats.length) activeChatId = chats[0].id;
+      renderChats();
+      renderCurrentChat();
+      if (!capabilityFor("chat").available) $("#send-button").disabled = true;
+    }
+  }
+
+  start();
+})();

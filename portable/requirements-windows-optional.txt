@@ -1,0 +1,8 @@
+# Install only the features you need in Mavi's own virtual environment.
+pyautogui>=0.9.54,<1
+pygetwindow>=0.0.9,<1
+faster-whisper>=1.1,<2
+huggingface-hub>=0.30,<2
+# Image runtime: install CUDA-compatible torch from pytorch.org's official selector,
+# then diffusers, transformers and accelerate per the official Qwen model card.
+# Pin the tested versions before declaring a Windows release stable.

@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f4f4f2">
+  <title>Mavi — Local AI workspace</title>
+  <link rel="icon" type="image/png" href="mavi-mark.png">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar" aria-label="Main navigation">
+      <div class="brand-row">
+        <a class="brand" href="#chat" aria-label="Mavi home">
+          <span class="brand-mark" aria-hidden="true"><img src="mavi-mark.png" alt=""></span>
+          <span class="brand-word">mavi<span class="brand-period">.</span></span>
+        </a>
+        <button class="icon-button sidebar-close" id="sidebar-close" aria-label="Close navigation" title="Close navigation">×</button>
+      </div>
+
+      <button class="new-chat" id="new-chat"><span aria-hidden="true">＋</span> New chat</button>
+      <nav class="primary-nav" aria-label="Workspace navigation">
+        <button class="nav-item active" data-view="chat"><span class="nav-icon">◌</span><span>Chats</span></button>
+        <button class="nav-item" data-view="gallery"><span class="nav-icon">▧</span><span>Generated files</span></button>
+        <button class="nav-item" data-view="discord"><span class="nav-icon">◉</span><span>Discord</span><span class="nav-state" id="discord-nav-state">—</span></button>
+      </nav>
+
+      <div class="sidebar-label-row">
+        <span class="sidebar-label">Recent chats</span>
+        <button class="icon-button tiny" id="clear-history" title="Clear chat history" aria-label="Clear chat history">⌫</button>
+      </div>
+      <div class="chat-list" id="chat-list" aria-label="Recent conversations"></div>
+      <div class="sidebar-footer">
+        <div class="local-badge"><span class="status-dot" id="connection-dot"></span><span id="connection-label">Connecting locally</span></div>
+        <button class="nav-item settings-link" data-view="settings"><span class="nav-icon">⚙</span><span>Settings</span></button>
+        <div class="sidebar-build">Private by default <span>·</span> Local workspace</div>
+      </div>
+    </aside>
+
+    <main class="main-area">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button class="icon-button menu-toggle" id="menu-toggle" aria-label="Open navigation" title="Open navigation">☰</button>
+          <div class="workspace-picker-wrap">
+            <button class="workspace-picker" id="workspace-picker" aria-haspopup="true" aria-expanded="false">
+              <span class="workspace-glyph" id="workspace-glyph">◌</span>
+              <span id="workspace-name">Chat</span>
+              <span class="picker-chevron">⌄</span>
+            </button>
+            <div class="workspace-menu hidden" id="workspace-menu" role="menu" aria-label="Choose workspace"></div>
+          </div>
+        </div>
+        <div class="topbar-right">
+          <div class="model-indicator" id="model-indicator"><span class="status-dot"></span><span>Checking local models…</span></div>
+          <button class="icon-button" id="refresh-state" title="Refresh local status" aria-label="Refresh local status">↻</button>
+          <button class="icon-button" id="theme-cycle" title="Change appearance" aria-label="Change appearance">◐</button>
+          <button class="avatar-button" id="open-settings" title="Settings" aria-label="Open settings"><img src="mavi-mark.png" alt=""></button>
+        </div>
+      </header>
+
+      <section class="chat-view view-panel" id="chat-view" aria-label="Chat workspace">
+        <div class="message-scroll" id="message-scroll">
+          <div class="welcome-state" id="welcome-state">
+            <div class="welcome-symbol" aria-hidden="true"><img src="mavi-mark.png" alt=""></div>
+            <p class="eyebrow">YOUR LOCAL WORKSPACE</p>
+            <h1>What can I help<br>you work through?</h1>
+            <p class="welcome-copy">Ask a question, shape an idea, or bring a file into the conversation. Your messages stay in this workspace.</p>
+            <div class="suggestion-grid">
+              <button class="suggestion" data-prompt="Help me think through a decision and give me a few clear options."><span>01</span><b>Think through a decision</b><small>Compare options with a clear rationale</small></button>
+              <button class="suggestion" data-prompt="Summarize the key points in this file."><span>02</span><b>Make sense of a file</b><small>Pull out the useful parts quickly</small></button>
+              <button class="suggestion" data-prompt="Help me draft a concise, natural-sounding message."><span>03</span><b>Find the right words</b><small>Write, revise, or simplify a draft</small></button>
+            </div>
+          </div>
+          <div class="messages" id="messages" aria-live="polite"></div>
+          <div class="job-card hidden" id="job-card" aria-live="polite">
+            <div class="job-top"><span class="job-spinner" aria-hidden="true"></span><div><strong id="job-status">Working locally</strong><p id="job-progress">Mavi is working on your request.</p></div><button class="quiet-button stop-button" id="stop-job">Stop</button></div>
+            <div class="progress-track" id="job-progress-track" role="progressbar" aria-label="Task progress"><span id="job-progress-bar"></span></div>
+            <div class="job-question hidden" id="job-question"></div>
+          </div>
+          <div class="job-artifacts hidden" id="job-artifacts" aria-label="Task files"></div>
+          <details class="agent-map hidden" id="agent-map">
+            <summary><span>Agent activity</span><span class="agent-count" id="agent-count">0 / 4 agents</span></summary>
+            <p class="agent-map-note">Live status and short summaries reported by this task's agents.</p>
+            <div class="agent-map-nodes" id="agent-map-nodes"></div>
+          </details>
+        </div>
+
+        <div class="composer-wrap">
+          <div class="attachment-strip hidden" id="attachment-strip"></div>
+          <form class="composer" id="composer-form">
+            <textarea id="composer-input" rows="1" aria-label="Message Mavi" placeholder="Message Mavi…" maxlength="12000"></textarea>
+            <div class="composer-toolbar">
+              <div class="composer-tools">
+                <button class="composer-tool" id="attach-button" type="button" title="Attach supported local files"><span>＋</span><span class="tool-label">Attach</span></button>
+                <input id="attachment-input" type="file" accept=".txt,.md,.csv,.json,.html,.css,.js,.py,.swift,.log,.png,.jpg,.jpeg,.wav,.pdf,.docx,.xlsx,.pptx,text/plain,text/markdown,application/json,text/csv,image/png,image/jpeg,audio/wav,audio/x-wav,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation" multiple hidden>
+                <button class="composer-tool record-button" id="record-button" type="button" title="Dictation is not ready on this device" aria-label="Record a local dictation"><span aria-hidden="true">●</span><span class="tool-label" id="record-label">Dictate</span></button>
+                <span class="tool-divider"></span>
+                <button class="mode-chip" type="button" id="composer-mode-chip"><span id="composer-mode-name">Chat</span><span>⌄</span></button>
+              </div>
+              <div class="composer-actions"><span class="enter-hint">Enter to send · Shift+Enter for new line</span><button class="send-button" id="send-button" type="submit" aria-label="Send message" title="Send message">↑</button></div>
+            </div>
+          </form>
+          <fieldset class="automation-approval hidden" id="automation-approval" aria-describedby="automation-approval-note">
+            <legend>Browser and computer action approvals · this task</legend>
+            <label><input type="radio" name="automation-policy" value="ask_each" checked> Ask before each action</label>
+            <label><input type="radio" name="automation-policy" value="routine_navigation"> Allow routine navigation</label>
+            <p id="automation-approval-note">Routine mode may scroll or open an ordinary navigation link, tab, or menu without repeating the prompt. Mavi still asks before typing, submitting, messaging, signing in, saving, or changing data or security. Every task still asks before reading or operating the selected window; this choice applies to this task only.</p>
+          </fieldset>
+          <fieldset class="automation-approval hidden" id="automation-scope" aria-describedby="automation-scope-note">
+            <legend>Window scope · this task</legend>
+            <label><input type="radio" name="automation-scope" value="single_app" checked> Stay in the selected app</label>
+            <label><input type="radio" name="automation-scope" value="whole_computer"> Allow approved app switches</label>
+            <p id="automation-scope-note">Single-app is the default. Whole-computer scope supports browsers, Webex, File Explorer, Notepad, Word, and Excel. Each app switch needs a separate approval; Mavi verifies the app window before reading it. Focus changes never switch targets automatically.</p>
+          </fieldset>
+          <p class="composer-note" id="composer-note">Local AI can make mistakes. Review important details.</p>
+        </div>
+      </section>
+
+      <section class="gallery-view view-panel hidden" id="gallery-view" aria-label="Generated files gallery">
+        <div class="gallery-content">
+          <div class="gallery-heading"><div><p class="eyebrow">LOCAL OUTPUTS</p><h1>Generated files</h1><p>Files created by Mavi in this local workspace.</p></div><div class="gallery-actions"><button class="quiet-button" id="refresh-gallery">Refresh</button><button class="quiet-button danger-button" id="clear-gallery">Clear files</button></div></div>
+          <div class="gallery-grid" id="gallery-grid" aria-live="polite"><p class="gallery-empty">Loading local files…</p></div>
+        </div>
+      </section>
+
+      <section class="settings-view view-panel hidden" id="settings-view" aria-label="Settings">
+        <div class="settings-content">
+          <p class="eyebrow">PREFERENCES</p><h1>Settings</h1>
+          <section class="settings-card">
+            <div class="card-heading"><div><h2>Local models</h2><p>Models available to this Mavi workspace.</p></div><button class="quiet-button" id="refresh-models">Refresh</button></div>
+            <div id="model-list" class="model-list"><div class="empty-models">Checking for installed local models…</div></div>
+            <label class="model-select-row">Preferred model<select id="model-select" aria-label="Preferred model"></select></label>
+            <p class="settings-help" id="hardware-note">Status is reported by the local workspace. Many local models work best with 32 GB or more of memory and an NVIDIA GPU; capability status comes from the backend.</p>
+          </section>
+          <section class="settings-card">
+            <h2>Appearance</h2><p>Choose how Mavi looks on this device.</p>
+            <div class="theme-options" role="group" aria-label="Appearance">
+              <button class="theme-option" data-theme-choice="system"><span class="theme-preview system-preview">◐</span><span>System</span></button>
+              <button class="theme-option" data-theme-choice="light"><span class="theme-preview light-preview">☼</span><span>Light</span></button>
+              <button class="theme-option" data-theme-choice="dark"><span class="theme-preview dark-preview">☾</span><span>Dark</span></button>
+            </div>
+          </section>
+          <section class="settings-card">
+            <h2>Developer workspace</h2><p>Choose a local project folder for code tasks.</p>
+            <label class="project-path-label" for="project-path">Project folder path on this device</label>
+            <div class="project-path-row"><input id="project-path" type="text" spellcheck="false" placeholder="For example: C:\\Users\\you\\Projects\\my-app"><button class="quiet-button" id="save-project-path">Save folder</button></div>
+            <p class="settings-help">Mavi uses this folder only for Developer tasks. The folder must already exist.</p>
+          </section>
+          <section class="settings-card preference-card">
+            <div class="card-heading"><div><h2>Saved preferences</h2><p>Optional prompt context, reviewed and saved by you.</p></div><span class="local-tag">ON THIS DEVICE</span></div>
+            <p class="settings-help">This text can guide local replies when enabled. It does not train a model. Mavi never imports ChatGPT history, and no adapter training starts automatically.</p>
+            <textarea id="settings-profile" rows="7" maxlength="4500" placeholder="No saved preference summary."></textarea>
+            <div class="profile-actions"><span id="profile-count">0 / 4,500 characters</span><button class="primary-button" id="save-settings-profile">Save local preferences</button></div>
+            <div class="settings-separator"></div>
+            <div class="card-heading"><div><h2>Personal adapter</h2><p id="adapter-status">Checking local adapter status…</p></div></div>
+            <p class="settings-help">Training is separate from saved preferences. It starts only after an explicit local action.</p>
+          </section>
+          <section class="settings-card">
+            <h2>Personal touch</h2><p class="settings-help">Optional: a phrase you type can reveal a small fireworks animation. These words stay in this workspace’s settings and are never added to model prompts or shared releases. Clear both fields to disable.</p>
+            <div class="form-grid"><label>Trigger phrase<input id="touch-trigger" maxlength="80" autocomplete="off" placeholder="Your phrase"></label><label>Display message<input id="touch-message" maxlength="80" autocomplete="off" placeholder="Your surprise message"></label></div>
+            <div class="profile-actions"><button class="quiet-button" id="import-personal-touch">Import personal touch</button><input type="file" id="touch-file" accept=".json,application/json" hidden><button class="primary-button" id="save-personal-touch">Save personal touch</button></div>
+          </section>
+          <section class="settings-card discord-settings">
+            <div class="card-heading"><div><h2>Discord connection</h2><p id="discord-status">Not connected</p></div><span class="local-tag" id="discord-badge">OPTIONAL</span></div>
+            <p class="settings-help">This connection belongs to this Mavi installation on this device. Each person needs their own running Mavi, Discord bot, private channel, and allowlisted Discord account. Your connection is not shared with anyone else.</p>
+            <div class="form-grid"><label>Discord application ID (optional)<input id="discord-application" type="text" inputmode="numeric" autocomplete="off" placeholder="Needed for bot invite and identity check"></label><label>Bot token<input id="discord-token" type="password" autocomplete="new-password" placeholder="Enter token each launch" spellcheck="false"></label><label>Private channel ID<input id="discord-channel" type="text" inputmode="numeric" placeholder="Channel ID"></label><label class="full-span">Allowed user IDs<input id="discord-users" type="text" placeholder="Comma-separated IDs"></label></div>
+            <div class="discord-invite-row"><span class="settings-help">Invite only the bot, with the suggested limited permissions.</span><a id="discord-invite-link" class="quiet-button disabled-link" href="#" aria-disabled="true" tabindex="-1" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">Create bot invite</a></div>
+            <p class="settings-help">The token is sent to the local backend and kept in memory only. Re-enter it after each launch. This page clears the field after every save attempt.</p>
+            <div class="profile-actions discord-actions"><label class="inline-check"><input id="discord-enabled" type="checkbox"> Allow Discord chat replies</label><button class="quiet-button" id="discord-open-guide">Setup guide</button><button class="primary-button" id="save-discord">Save Discord settings</button></div>
+            <p class="settings-help">Chat replies are optional. Starting remote local tasks is a separate permission below and stays off until you enable it.</p>
+            <label class="discord-task-consent"><input id="discord-allow-tasks" type="checkbox"><span><strong>Allow Discord to start local tasks</strong><small>When enabled, people on the configured allowlist in this channel can ask Mavi to work with local files, generate or edit images, and use browser or computer tasks. Mavi can send task outputs back to Discord. Passwords and other private credentials must be entered directly on the computer.</small></span></label>
+          </section>
+          <section class="settings-card danger-card"><h2>Chat history</h2><p>Remove saved conversations from this local workspace.</p><button class="quiet-button danger-button" id="clear-history-settings">Clear all chats</button></section>
+        </div>
+      </section>
+
+      <section class="discord-view view-panel hidden" id="discord-view" aria-label="Discord setup">
+        <div class="discord-content"><p class="eyebrow">OPTIONAL CONNECTION</p><h1>Discord</h1><p class="discord-intro">This connects Discord to the Mavi running on this device, using its local models and files. Each person must set up their own bot and private channel. A connection is never shared between Mavi installations.</p><div class="discord-status-card"><span class="discord-status-mark">◉</span><div><strong id="discord-view-title">Not configured</strong><p id="discord-view-copy">A local connection status will appear here.</p></div><button class="primary-button" id="discord-open-settings">Open settings</button></div><div class="discord-details"><div><span>Connection</span><b id="discord-connection-value">Not connected</b></div><div><span>Access</span><b>Allowed users only</b></div><div><span>Privacy</span><b>Token is write-only</b></div></div><section class="discord-guide"><p class="eyebrow">SETUP GUIDE</p><h2>Connect your own Discord bot</h2><ol class="discord-setup-steps"><li>In the <a href="https://discord.com/developers/applications" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">official Discord Developer Portal</a>, create an application and copy its Application ID into Settings. It is optional, but enables the invite link and checks the token’s bot identity.</li><li>Open the app’s <b>Bot</b> page and enable <b>Message Content Intent</b>. Copy the bot token into this device’s Settings when you are ready to connect. It is kept in memory only and must be entered again after Mavi restarts.</li><li>Create a private server channel visible only to the bot and people you trust. In Discord, open <b>User Settings → Advanced</b> and enable <b>Developer Mode</b>; then right-click the channel and your own profile to copy their IDs into Settings. See <a href="https://support.discord.com/hc/en-us/articles/206346498-Where-can-I-find-my-User-Server-Message-ID" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">Discord’s guide to copying IDs</a>. Only allowlist accounts you trust.</li><li>Use the invite link in Settings to add only the bot to your server. It requests the <code>bot</code> scope with View Channels, Send Messages, Embed Links, Attach Files, and Read Message History permissions. It does not request Administrator.</li><li>In Settings, opt in to Discord chat replies. Remote tasks, which can work with files on this device, have a separate checkbox and remain off by default.</li><li>Save the settings and wait for the status above to say <b>Connected</b>. Then test in the selected channel with <code>!mavi ask Hello</code>.</li></ol><p class="settings-help">The bot can act only through this Mavi instance while it is running. Never share its token. Do not enable remote tasks unless you trust every allowlisted account with the local actions described in Settings.</p></section><section class="discord-guide"><p class="eyebrow">COMMAND GUIDE</p><h2>Work with Mavi from Discord</h2><div class="discord-command-list"><div><b>Ask</b><span><code>!mavi ask &lt;request&gt;</code> Ask a local question.</span></div><div><b>Task</b><span><code>!mavi task &lt;request&gt;</code> Start local multi-step work. Requires the separate task opt-in.</span></div><div><b>Image</b><span><code>!mavi image &lt;prompt&gt;</code> Generate an image and receive it in Discord.</span></div><div><b>Edit</b><span><code>!mavi edit &lt;instruction&gt;</code> Attach 1–3 PNG or JPEG images.</span></div><div><b>Status</b><span><code>!mavi status</code> Check your task’s progress.</span></div><div><b>Steer</b><span><code>!mavi steer &lt;instruction&gt;</code> Guide an active chat, browser, or computer task.</span></div><div><b>Answer</b><span><code>!mavi answer &lt;reply&gt;</code> Reply when Mavi is waiting for your input.</span></div><div><b>Stop</b><span><code>!mavi stop</code> Stop your active task.</span></div><div><b>Help</b><span><code>!mavi help</code> Show the available commands.</span></div></div><p class="settings-help">Your computer must be awake and connected to the internet for Discord tasks to run.</p></section></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="mobile-scrim hidden" id="mobile-scrim"></div>
+
+  <dialog class="onboarding-dialog" id="onboarding-dialog" aria-labelledby="onboarding-title">
+    <div class="onboarding-frame" id="onboarding-clean-step">
+      <div class="onboarding-mark" aria-hidden="true"><img src="mavi-mark.png" alt=""></div><p class="eyebrow">A FRESH START</p><h1 id="onboarding-title">Make Mavi your own.</h1>
+      <p class="onboarding-copy">Mavi starts with no personal preference context. Choose a clean start, or add a short summary you create and review yourself.</p>
+      <div class="onboarding-choice clean-choice"><span class="choice-number">01</span><div><b>Continue clean</b><p>No saved preference context or personal adapter is used. Mavi does not inspect your ChatGPT history or train in the background.</p></div><button class="primary-button" id="continue-clean">Continue clean</button></div>
+      <div class="onboarding-choice"><span class="choice-number">02</span><div><b>Personalize</b><p>Ask ChatGPT for a brief using only history it can actually see, then review and save it locally.</p></div><button class="quiet-button" id="start-personalize">Personalize</button></div>
+      <p class="onboarding-footnote">Saved preference text is prompt context only. Model training is a separate, explicit action.</p>
+    </div>
+    <div class="onboarding-frame hidden" id="onboarding-personalize-step">
+      <div class="onboarding-nav"><button class="quiet-button" id="back-onboarding">← Back</button><span class="local-tag">LOCAL ONLY</span></div>
+      <p class="eyebrow">OPTIONAL PREFERENCE SUMMARY</p><h1 id="onboarding-personalize-title">Bring only what you choose.</h1>
+      <p class="onboarding-copy">ChatGPT may not have access to every conversation. Ask for a summary from the history it can see, check it for private details, then bring the text here.</p>
+      <div class="prompt-box"><div class="prompt-heading"><b>Prompt to copy into ChatGPT</b><button class="quiet-button" id="copy-summary-prompt">Copy prompt</button></div><p id="summary-prompt-text">Create a short preference summary for a local assistant called Mavi using only conversation history you can actually see in this chat. Do not assume you can access all of my ChatGPT history. If your context is limited, say so. Capture stable preferences for response style, formatting, accessibility, and recurring workflows. Exclude names, contact details, account or project identifiers, credentials, and sensitive personal details. Do not quote conversations or add unsupported facts. Return only the concise summary, under 4,500 characters, so I can review and edit it before saving locally.</p></div>
+      <div class="import-row"><button class="quiet-button" id="import-profile">Import .txt or .md</button><span id="import-name">No file selected</span><span class="char-count" id="onboarding-char-count">0 / 4,500</span><input id="profile-file" type="file" accept=".txt,.md,text/plain,text/markdown" hidden></div>
+      <label class="editor-label" for="onboarding-profile">Editable preview</label><textarea id="onboarding-profile" maxlength="4500" placeholder="Paste a summary or import a text file. Review and edit it before saving."></textarea>
+      <p class="privacy-note">The imported file stays on this device. Mavi does not scrape history or send this summary anywhere. Training is separate and never starts automatically.</p>
+      <p class="inline-error hidden" id="onboarding-error" role="alert"></p>
+      <div class="onboarding-actions"><button class="quiet-button" id="personalize-clean">Continue clean</button><button class="primary-button" id="save-preferences" disabled>Save local preferences</button></div>
+    </div>
+    <div class="onboarding-frame hidden" id="onboarding-discord-step">
+      <div class="onboarding-mark" aria-hidden="true"><img src="mavi-mark.png" alt=""></div><p class="eyebrow">OPTIONAL · YOUR DEVICE</p><h1 id="onboarding-discord-title">Connect your Discord?</h1>
+      <p class="onboarding-copy">Discord can reach only the Mavi running on your own laptop, with its local models and files. Set up your own bot, private channel, and allowlisted account; this does not share a connection with another person’s Mavi. You can do this later in Settings.</p>
+      <div class="onboarding-actions"><button class="quiet-button" id="skip-discord-onboarding">Skip for now</button><button class="primary-button" id="connect-discord-onboarding">Connect your Discord</button></div>
+    </div>
+  </dialog>
+
+  <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
+  <script src="app.js" defer></script>
+</body>
+</html>
