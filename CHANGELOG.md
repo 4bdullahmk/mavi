@@ -13,6 +13,9 @@
 - Initialize the macOS automation helper on the main application run loop to avoid a capture-time crash.
 - Verify read-only Brave window capture with Screen Recording and Accessibility permissions enabled. Windows execution and hardware qualification remain pending.
 - Build 27 adds course-source guidance to Mac and Windows computer-control prompts, including synthetic step-by-step controller calls.
+- Build 28 keeps class assignment help grounded in materials the user supplies or the course assigns. Missing material is requested rather than replaced with web searches or general knowledge; source facts are distinguished from calculations and visible citations are not invented.
+- Build 28 allows a user-requested full SmartBook practice activity to continue until it finishes or the user presses Stop. Mac controls use bounded targets for visible links, buttons, checkboxes and radio buttons. One monitored SmartBook practice item was answered correctly using a class-source excerpt supplied by the user; this does not verify autonomous source discovery or full-workbook completion.
+- Build 28 detects an existing Apple Silicon MLX-Gen runtime with complete official Qwen Image generation/edit checkpoints. It runs locally in offline mode, checks available unified memory before loading, and does not download image models automatically. Progress displays backend-reported step counts and an ETA only after enough observed steps; it does not invent percentages. Real image generation and quality remain unverified for this build.
 
 ## 2.0.0 — desktop web workspace and task continuation
 
@@ -65,7 +68,7 @@
 
 ### Validation limits
 
-The Mac source compiles and local regression checks pass. Local chat, basic file creation, and a live Discord `!mavi ask` chat have been exercised on macOS. Windows execution, Windows Discord operation, the two-install Discord acceptance test, Windows desktop control, CUDA image generation, and model training still need tests on their actual target services and hardware. Mock tests do not establish model quality or hardware performance. This public-source candidate is not a finished Windows release; native macOS distribution still needs appropriate signing/notarization.
+The full automated suite passes with one skipped test, and the updater and source-hygiene checks pass. Local chat, basic file creation, a live Discord `!mavi ask` chat, read-only Brave capture, and one monitored SmartBook practice answer have been exercised on macOS. The SmartBook check used a class-source excerpt supplied by the user and did not verify a complete workbook. Windows execution, Windows Discord operation, the two-install Discord acceptance test, Windows desktop control, CUDA image generation, Apple Silicon image generation for this build, and model training still need tests on their target services or hardware. Mock tests do not establish model quality or hardware performance. The public Mac app is not notarized.
 
 ### Updating
 

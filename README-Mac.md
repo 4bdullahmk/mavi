@@ -15,7 +15,9 @@ If Mavi cannot find Python, set `MAVI_PYTHON3` to the full Python executable pat
 
 ## Models
 
-After installing Ollama, download a model that fits your Mac. For a modest starting point, install a standard Qwen 3 8B model in Ollama, then select it in Mavi. Model suitability depends on available memory and the task. Image generation uses separate, large model weights and can require substantial unified memory and disk space. Review Mavi's displayed requirements before choosing an image model. No model is downloaded automatically by the app.
+After installing Ollama, download a model that fits your Mac. For a modest starting point, install a standard Qwen 3 8B model in Ollama, then select it in Mavi. Model suitability depends on available memory and the task.
+
+Image generation and editing are optional and use the local Apple Silicon MLX-Gen runtime with official quantized Qwen Image checkpoints. Mavi can reuse a compatible runtime and complete checkpoints already present in the user's local Mavi support folder. If the runtime or checkpoint is missing, image generation stays unavailable; Mavi does not install the image runtime or download its large weights automatically. Check the current unified-memory requirement before starting a job. Progress uses backend-reported step counts and shows an ETA only after enough actual steps have been observed. Performance and image quality depend on the Mac and are not verified for this source package.
 
 ## Install and update
 
@@ -36,7 +38,7 @@ The standalone web client is a separate implementation from the native SwiftUI c
 From the repository root on Apple Silicon with Xcode Command Line Tools installed:
 
 ```sh
-MAVI_VERSION=2.0.1 MAVI_BUILD_NUMBER=27 ./app/build_web_macos.sh
+MAVI_VERSION=2.0.1 MAVI_BUILD_NUMBER=28 ./app/build_web_macos.sh
 ```
 
 The build creates an ad-hoc signed app under a temporary build directory and a versioned ZIP plus SHA-256 sidecar in `app/dist/`. Set `MAVI_SIGN_IDENTITY` to an existing signing identity if you have one. A Developer ID signature and notarization are needed for the standard trusted-download experience.

@@ -12,7 +12,11 @@ For browser tasks, specify the site and goal, for example: “Go into Canvas and
 
 ## Course workflow guidance
 
-For Canvas, Pearson, McGraw Hill, SmartBook, and class assignment requests, Mavi adds guidance to use only materials you supply or the course assigns. It asks for missing materials instead of filling gaps with web searches or general knowledge, cites visible chapter/page/slide details without inventing them, distinguishes source facts from derived calculations, and pauses for review before graded submission. You can explicitly broaden the source scope. This is prompt guidance, not model training. Synthetic tests cover the policy; live course assignment completion has not been verified.
+For Canvas, Pearson, McGraw Hill, SmartBook, and class assignment requests, Mavi adds guidance to use only materials you supply or the course assigns. It asks for missing materials instead of filling gaps with web searches or general knowledge, cites visible chapter/page/slide details without inventing them, distinguishes source facts from derived calculations, and pauses for review before graded submission. You can explicitly broaden the source scope. This is prompt guidance, not model training. In one monitored SmartBook practice item, Mavi selected the correct answer using a class-source excerpt supplied by the user. A full practice activity can continue until it finishes or you press Stop; broad assignment completion and autonomous source discovery have not been verified.
+
+## Image generation
+
+On Apple Silicon, the Mac desktop workspace can detect and reuse a compatible local MLX-Gen runtime and complete official Qwen Image generation/edit checkpoints. It runs offline, checks available unified memory before model loading, and does not install the runtime or download weights automatically. Mac image quality and performance have not been verified for this release. On Windows, image generation and editing use separate optional official model downloads and a compatible NVIDIA/CUDA setup; 32 GB of system RAM alone does not guarantee support. See [Mac setup](README-Mac.md) and [Windows image requirements](WINDOWS.md#image-generation-and-editing).
 
 ## Windows setup
 

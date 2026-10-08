@@ -14,6 +14,130 @@ import app_context
 
 
 class MacAutomationTests(unittest.TestCase):
+    def test_concise_smartbook_requests_enable_only_full_practice_scope(self):
+        self.assertTrue(mac._continuous_smartbook_practice_requested("Do my SmartBook practice"))
+        self.assertTrue(mac._continuous_smartbook_practice_requested("Work through SmartBook Recharge"))
+        self.assertTrue(mac._continuous_smartbook_practice_requested("Complete the SmartBook workbook"))
+        self.assertTrue(mac._continuous_smartbook_practice_requested("Do all SmartBook Recharge questions until done"))
+        self.assertFalse(mac._continuous_smartbook_practice_requested("Do one SmartBook practice question"))
+        self.assertFalse(mac._continuous_smartbook_practice_requested("Do my SmartBook practice question"))
+        self.assertTrue(mac._continuous_smartbook_practice_requested("Do all my SmartBook practice questions"))
+        self.assertFalse(mac._continuous_smartbook_practice_requested("What is SmartBook practice?"))
+        self.assertFalse(mac._continuous_smartbook_practice_requested("Don't complete the SmartBook practice"))
+
+    def test_continuous_practice_runs_past_twenty_actions_with_bounded_memory(self):
+        count = 21
+        targets = [{"id": str(index), "role": "AXCheckBox", "label": f"Currently unselected: option {index}"}
+                   for index in range(count)]
+        outputs = [json.dumps({"action": "target", "target_id": str(index), "reason": "Select practice answer", "risk": "low"})
+                   for index in range(count)]
+        outputs.append(json.dumps({"action": "done", "text": "The practice set is complete."}))
+        model_calls = []
+        actions = []
+        captures = []
+        prompts = []
+        remembered = []
+        def helper(payload, **_kwargs):
+            if payload["op"] == "default_browser": return {"bundle_id": "com.brave.Browser", "name": "Brave"}
+            if payload["op"] == "windows": return {"windows": [{"window_id": 7, "title": "SmartBook Recharge"}]}
+            if payload["op"] == "capture":
+                captures.append(payload)
+                return {"bundle_id": "com.brave.Browser", "window_id": 7,
+                        "image_base64": base64.b64encode(b"screen").decode(), "targets": targets}
+            if payload["op"] == "action": actions.append(payload["action"])
+            return {"screen_recording": True, "accessibility": True}
+        def model(messages, **_kwargs):
+            model_calls.append(messages)
+            self.assertLessEqual(len(messages), 15)
+            return outputs[len(model_calls) - 1]
+        context = {"ask": lambda question: prompts.append(question) or "yes", "call_model": model,
+                   "remember_app_context": remembered.append, "progress": prompts.append,
+                   "screen_access_approved": True}
+        with patch.object(mac, "_call_helper", side_effect=helper), patch.object(mac, "_settle_after_action"):
+            result = mac.run("Do my SmartBook practice", [], context, browser=True)
+        self.assertIn("practice set is complete", result)
+        self.assertEqual(len(actions), count)
+        self.assertEqual(len(captures), count + 1)
+        self.assertEqual(len(model_calls), count + 1)
+        self.assertEqual(len([value for value in prompts if isinstance(value, str) and "Allow Mavi" in value]), 1)
+        self.assertTrue(any(isinstance(value, str) and "Stop is available" in value for value in prompts))
+        self.assertIn("already authorized", model_calls[0][0]["content"])
+        self.assertEqual(len(remembered[-1]["completed_steps"]), 20)
+
+    def test_explicit_full_practice_scope_authorizes_observed_confidence_submit_and_next(self):
+        targets = [
+            {"id": "0", "role": "AXCheckBox", "label": "Currently unselected: Net income"},
+            {"id": "1", "role": "AXButton", "label": "High Confidence"},
+            {"id": "2", "role": "AXButton", "label": "Submit Answer"},
+            {"id": "3", "role": "AXButton", "label": "Next Question"},
+        ]
+        outputs = iter([json.dumps({"action": "target", "target_id": target["id"], "reason": "Select observed practice control", "risk": "low"})
+                        for target in targets] + [json.dumps({"action": "done", "text": "Practice finished."})])
+        asks = []
+        actions = []
+        def helper(payload, **_kwargs):
+            if payload["op"] == "default_browser": return {"bundle_id": "com.brave.Browser", "name": "Brave"}
+            if payload["op"] == "windows": return {"windows": [{"window_id": 7, "title": "SmartBook Recharge"}]}
+            if payload["op"] == "capture":
+                return {"bundle_id": "com.brave.Browser", "window_id": 7,
+                        "image_base64": base64.b64encode(b"screen").decode(), "targets": targets}
+            if payload["op"] == "action": actions.append(payload["action"])
+            return {"screen_recording": True, "accessibility": True}
+        context = {"ask": lambda question: asks.append(question) or "yes", "call_model": lambda *_a, **_kw: next(outputs),
+                   "screen_access_approved": True}
+        with patch.object(mac, "_call_helper", side_effect=helper), patch.object(mac, "_settle_after_action"):
+            mac.run("Work through SmartBook Recharge", [], context, browser=True)
+        self.assertEqual([action["target_id"] for action in actions], [target["id"] for target in targets])
+        self.assertEqual(len(asks), 1)  # One workspace-level authorization, no per-question prompts.
+
+    def test_single_question_request_keeps_normal_action_review(self):
+        target = {"id": "0", "role": "AXCheckBox", "label": "Currently unselected: Net income"}
+        actions = []
+        asks = []
+        outputs = iter([json.dumps({"action": "target", "target_id": "0", "reason": "Select the answer", "risk": "low"}),
+                        json.dumps({"action": "done", "text": "The question is ready."})])
+        def helper(payload, **_kwargs):
+            if payload["op"] == "default_browser": return {"bundle_id": "com.brave.Browser", "name": "Brave"}
+            if payload["op"] == "windows": return {"windows": [{"window_id": 7, "title": "SmartBook"}]}
+            if payload["op"] == "capture":
+                return {"bundle_id": "com.brave.Browser", "window_id": 7,
+                        "image_base64": base64.b64encode(b"screen").decode(), "targets": [target]}
+            if payload["op"] == "action": actions.append(payload["action"])
+            return {"screen_recording": True, "accessibility": True}
+        context = {"ask": lambda question: asks.append(question) or "yes", "call_model": lambda *_a, **_kw: next(outputs),
+                   "screen_access_approved": True}
+        with patch.object(mac, "_call_helper", side_effect=helper), patch.object(mac, "_settle_after_action"):
+            mac.run("Do one SmartBook practice question", [], context, browser=True)
+        self.assertEqual(len(actions), 1)
+        self.assertTrue(any("Mavi wants to open the selected target" in question for question in asks))
+
+    def test_stop_event_interrupts_continuous_practice_after_current_input(self):
+        class StopEvent:
+            stopped = False
+            def is_set(self): return self.stopped
+        stop = StopEvent()
+        target = {"id": "0", "role": "AXCheckBox", "label": "Currently unselected: Net income"}
+        captures = []
+        actions = []
+        def helper(payload, **_kwargs):
+            if payload["op"] == "default_browser": return {"bundle_id": "com.brave.Browser", "name": "Brave"}
+            if payload["op"] == "windows": return {"windows": [{"window_id": 7, "title": "SmartBook"}]}
+            if payload["op"] == "capture":
+                captures.append(payload)
+                return {"bundle_id": "com.brave.Browser", "window_id": 7,
+                        "image_base64": base64.b64encode(b"screen").decode(), "targets": [target]}
+            if payload["op"] == "action":
+                actions.append(payload["action"]); stop.stopped = True
+            return {"screen_recording": True, "accessibility": True}
+        context = {"ask": lambda _q: "yes", "call_model": lambda *_a, **_kw: json.dumps({"action": "target", "target_id": "0", "reason": "Select answer", "risk": "low"}),
+                   "cancelled": stop, "screen_access_approved": True}
+        with patch.object(mac, "_call_helper", side_effect=helper):
+            with self.assertRaises(InterruptedError):
+                mac.run("Do my SmartBook practice", [], context, browser=True)
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(len(captures), 1)
+        self.assertEqual(context["app_context"]["status"], "stopped")
+
     def test_course_materials_policy_reaches_synthetic_controller_turn(self):
         helper = []
         seen = []
@@ -120,6 +244,64 @@ class MacAutomationTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "same app action three times"):
                 mac.run("Open Brave and read the practice exercise", [], context, browser=True)
         self.assertEqual(len(actions), 2)
+
+    def test_coordinate_click_repairs_to_exact_visible_checkbox_target(self):
+        actions = []
+        captures = []
+        outputs = iter([
+            json.dumps({"action": "click", "x": 504, "y": 616, "reason": "Select Expenses", "risk": "low"}),
+            json.dumps({"action": "target", "target_id": "0.3", "reason": "Select Expenses", "risk": "low"}),
+            json.dumps({"action": "done", "text": "The requested choice is selected."}),
+        ])
+        targets = [
+            {"id": "0.3", "role": "AXCheckBox", "label": "Currently unselected: Expenses"},
+            {"id": "0.4", "role": "AXCheckBox", "label": "Currently unselected: Net income"},
+        ]
+        def helper(payload, **_kwargs):
+            if payload["op"] == "windows": return {"windows": [{"window_id": 7, "title": "SmartBook"}]}
+            if payload["op"] == "capture":
+                captures.append(payload)
+                return {"bundle_id": "com.brave.Browser", "window_id": 7,
+                        "image_base64": base64.b64encode(b"same screenshot").decode(), "targets": targets}
+            if payload["op"] == "action": actions.append(payload["action"])
+            return {}
+        model_calls = []
+        def model(messages, **_kwargs):
+            model_calls.append(messages)
+            if len(model_calls) == 2:
+                self.assertIn("coordinate clicks are not allowed", messages[-1]["content"])
+                self.assertIn('"id":"0.3"', messages[-1]["content"])
+                self.assertIn("images", messages[-2])
+            return next(outputs)
+        context = {"ask": lambda _q: "yes", "call_model": model, "automation_policy": "routine_navigation"}
+        with patch.object(mac, "_call_helper", side_effect=helper), patch.object(mac, "_settle_after_action"):
+            result = mac.run("Open Brave and select Expenses", [], context, browser=True)
+        self.assertIn("requested choice is selected", result)
+        self.assertEqual(len(captures), 2)
+        self.assertEqual(actions, [{"kind": "target", "target_id": "0.3", "expected_label": "Currently unselected: Expenses",
+                                   "expected_role": "AXCheckBox", "expected_bounds": None}])
+
+    def test_coordinate_click_repair_fails_closed_without_app_input(self):
+        actions = []
+        click = json.dumps({"action": "click", "x": 500, "y": 600, "reason": "Choose an option", "risk": "low"})
+        targets = [{"id": "0.3", "role": "AXRadioButton", "label": "Currently unselected: Net income"}]
+        def helper(payload, **_kwargs):
+            if payload["op"] == "windows": return {"windows": [{"window_id": 7, "title": "SmartBook"}]}
+            if payload["op"] == "capture":
+                return {"bundle_id": "com.brave.Browser", "window_id": 7,
+                        "image_base64": base64.b64encode(b"screen").decode(), "targets": targets}
+            if payload["op"] == "action": actions.append(payload["action"])
+            return {}
+        model_calls = []
+        def model(_messages, **_kwargs):
+            model_calls.append(True)
+            return click
+        context = {"ask": lambda _q: "yes", "call_model": model, "automation_policy": "routine_navigation"}
+        with patch.object(mac, "_call_helper", side_effect=helper), patch.object(mac, "_settle_after_action"):
+            with self.assertRaisesRegex(RuntimeError, "still proposed a coordinate click"):
+                mac.run("Open Brave and choose Net income", [], context, browser=True)
+        self.assertEqual(len(model_calls), 2)
+        self.assertEqual(actions, [])
 
     def test_follow_up_preserves_latest_instruction_after_long_prior_context(self):
         prior = "Prior task: stop when the assignment page is visible; do not review the practice material. " + ("old background context. " * 80)

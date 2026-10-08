@@ -126,6 +126,25 @@ button:disabled { cursor: not-allowed; opacity: .46; }
 .workspace-option b { display: block; font-size: 12px; font-weight: 570; }
 .workspace-option small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
 .workspace-option .option-state { color: var(--subtle); font-size: 10px; }
+.team-toggle { min-height: 32px; display: inline-flex; align-items: center; gap: 6px; padding: 0 9px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--muted); font-size: 11px; }
+.team-toggle:hover, .team-toggle[aria-pressed="true"] { color: var(--text); border-color: var(--line-strong); }
+.penguin-state { width: 6px; height: 6px; border-radius: 50%; background: var(--subtle); }
+.team-toggle[data-state="working"] .penguin-state { background: var(--green); }
+.team-toggle[data-state="waiting"] .penguin-state { background: #b3863b; }
+.team-toggle[data-state="done"] .penguin-state { background: var(--green); }
+.composer-wrap { position: relative; }
+.penguin-companion { position: absolute; z-index: 2; right: 0; top: -72px; width: 64px; height: 64px; display: grid; place-items: center; padding: 7px; border: 1px solid var(--line-strong); border-radius: 22px; background: var(--surface); color: var(--text); box-shadow: 0 8px 24px rgba(12,12,10,.12); }
+.penguin-companion:hover { border-color: color-mix(in srgb, var(--text) 32%, var(--line)); }
+.penguin-companion:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+.penguin-companion-art { width: 48px; height: 48px; overflow: visible; animation: penguin-idle 3.4s ease-in-out infinite; }
+.penguin-eye { transform-box: fill-box; transform-origin: center; animation: penguin-blink 8s ease-in-out infinite; }
+.penguin-eye-right { animation-delay: .08s; }
+.penguin-companion.is-greeting .penguin-flipper { transform-box: fill-box; transform-origin: top center; animation: penguin-wave .42s ease-in-out 2; }
+.penguin-companion.is-greeting .penguin-eye-right { animation: penguin-greet-wink .55s ease-in-out 1; }
+@keyframes penguin-idle { 50% { transform: translateY(-2px); } }
+@keyframes penguin-blink { 0%, 5%, 7%, 100% { transform: scaleY(1); } 6% { transform: scaleY(.08); } }
+@keyframes penguin-greet-wink { 0%, 35%, 100% { transform: scaleY(1); } 18% { transform: scaleY(.08); } }
+@keyframes penguin-wave { 50% { transform: rotate(-28deg); } }
 .model-indicator { display: flex; align-items: center; gap: 8px; margin-right: 3px; color: var(--muted); font-size: 11px; white-space: nowrap; }
 .avatar-button { width: 31px; height: 31px; margin-left: 2px; border: 1px solid var(--line-strong); border-radius: 50%; background: var(--surface); color: var(--text); font-size: 11px; font-weight: 700; }
 
@@ -211,6 +230,13 @@ button:disabled { cursor: not-allowed; opacity: .46; }
 .progress-track { height: 3px; margin-top: 13px; overflow: hidden; border-radius: 8px; background: var(--line); }
 .progress-track span { width: 0; height: 100%; display: block; border-radius: inherit; background: var(--text); transition: width .25s; }
 #chat-view:not(.hidden) .job-card.image-generating:not(.hidden) .progress-track.is-indeterminate > span { width: 30%; background: linear-gradient(90deg, transparent, var(--muted), transparent); opacity: .62; filter: grayscale(1); animation: image-shimmer 1.8s ease-in-out infinite; }
+/* A composited shimmer, with no preview renders or GPU-heavy canvas work. */
+.image-placeholder { display: none; }
+#chat-view:not(.hidden) .job-card.image-generating:not(.hidden) .image-placeholder { display: flex; position: relative; align-items: center; justify-content: center; width: min(100%, 300px); aspect-ratio: 4 / 3; margin-top: 16px; overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); color: var(--muted); isolation: isolate; }
+.image-placeholder::before { content: ""; position: absolute; inset: 0; background: linear-gradient(110deg, transparent 15%, var(--line-strong) 50%, transparent 85%); transform: translateX(-100%); }
+#chat-view:not(.hidden) .job-card.image-generating:not(.hidden) .image-placeholder::before { animation: image-tile-shimmer 2.8s ease-in-out infinite; }
+.image-placeholder span { position: relative; font-size: 12px; letter-spacing: .01em; }
+@keyframes image-tile-shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
 @keyframes image-shimmer { from { transform: translateX(-110%); } to { transform: translateX(340%); } }
 .mavi-surprise { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; border-radius: 0; overflow: hidden; background: #200a0f; color: #fff; }
 .mavi-surprise::backdrop { background: #200a0f; }
@@ -223,6 +249,8 @@ button:disabled { cursor: not-allowed; opacity: .46; }
 @keyframes mavi-love-arrive { from { opacity: 0; transform: translateY(14px) scale(.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes mavi-heart-arrive { from { opacity: 0; transform: translateY(18px) rotate(var(--tilt)) scale(.15); } to { opacity: var(--alpha); transform: translateY(0) rotate(var(--tilt)) scale(var(--scale)); } }
 @media (prefers-reduced-motion: reduce) {
+  .penguin-companion-art, .penguin-eye, .penguin-companion.is-greeting .penguin-flipper, .penguin-companion.is-greeting .penguin-eye-right { animation: none; }
+  #chat-view:not(.hidden) .job-card.image-generating:not(.hidden) .image-placeholder::before { animation: none; transform: none; opacity: .2; }
   .mavi-surprise-message h1, .mavi-surprise-hearts span { animation: none; }
   #chat-view:not(.hidden) .job-card.image-generating:not(.hidden) .progress-track.is-indeterminate > span { animation: none; transform: none; opacity: .35; }
 }
@@ -235,6 +263,11 @@ button:disabled { cursor: not-allowed; opacity: .46; }
 .agent-map { margin: 10px 0 24px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); overflow: hidden; }
 .agent-map > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 15px; cursor: pointer; font-size: 12px; font-weight: 620; list-style-position: inside; }
 .agent-map > summary:focus-visible { outline: 2px solid var(--text); outline-offset: -3px; }
+.team-preference { display: flex; align-items: flex-start; gap: 10px; margin-top: 18px; padding-top: 15px; border-top: 1px solid var(--line); cursor: pointer; }
+.team-preference input { margin: 2px 0 0; accent-color: var(--accent); }
+.team-preference span { display: grid; gap: 4px; }
+.team-preference b { font-size: 11px; font-weight: 600; }
+.team-preference small { color: var(--muted); font-size: 10px; line-height: 1.45; }
 .agent-count { color: var(--muted); font-size: 10px; font-weight: 500; }
 .agent-map-note { margin: 0; padding: 0 15px 10px; color: var(--muted); font-size: 10px; }
 .agent-map-nodes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 9px; padding: 0 12px 12px; }
@@ -245,10 +278,11 @@ button:disabled { cursor: not-allowed; opacity: .46; }
 .agent-identity strong { overflow-wrap: anywhere; font-size: 11px; }
 .agent-identity span, .agent-model, .agent-parent, .agent-time { color: var(--muted); font-size: 9px; }
 .agent-status { flex: 0 0 auto; padding: 3px 6px; border-radius: 999px; background: var(--hover); color: var(--muted); font-size: 9px; text-transform: capitalize; }
-.agent-status.status-running { color: var(--green); }
+.agent-status.status-running, .agent-status.status-completed { color: var(--green); }
 .agent-status.status-failed { color: var(--red); }
-.agent-model, .agent-parent { margin: 8px 0 0; overflow-wrap: anywhere; }
-.agent-summary { margin: 9px 0 0; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.agent-model, .agent-parent, .agent-task { margin: 8px 0 0; overflow-wrap: anywhere; }
+.agent-summary { display: grid; gap: 3px; margin: 9px 0 0; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.agent-summary b { color: var(--muted); font-size: 8px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; }
 .agent-time { display: block; margin-top: 8px; }
 .quiet-button { min-height: 34px; padding: 0 11px; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--muted); font-size: 11px; font-weight: 560; }
 .quiet-button:hover:not(:disabled) { border-color: var(--line-strong); background: var(--hover); color: var(--text); }
@@ -428,6 +462,10 @@ button:disabled { cursor: not-allowed; opacity: .46; }
   .model-indicator .status-dot { display: none; }
   .topbar-right #refresh-state { display: none; }
   .avatar-button { width: 29px; height: 29px; }
+  .team-toggle { gap: 5px; width: auto; justify-content: center; padding: 0 7px; font-size: 10px; }
+  .team-toggle > span { display: inline; }
+  .penguin-companion { right: 0; top: -67px; width: 58px; height: 58px; padding: 5px; border-radius: 19px; }
+  .penguin-companion-art { width: 44px; height: 44px; }
   .welcome-state { width: calc(100% - 34px); margin-top: 26px; }
   .welcome-state h1 { font-size: 33px; }
   .welcome-copy { margin: 11px auto 19px; font-size: 12px; }

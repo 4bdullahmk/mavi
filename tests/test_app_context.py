@@ -19,6 +19,45 @@ import macos_automation
 
 
 class AppContextTests(unittest.TestCase):
+    def test_course_platform_requests_route_to_browser_without_model_router(self):
+        job = {"_model": "qwen3:4b", "_cancel": threading.Event(), "_app_context": None}
+        requests = (
+            "Go into Canvas and work through my assignment",
+            "Do the next Pearson assignment",
+            "Open https://school.example.edu/courses/12/assignments/4 and complete the assignment",
+            "Go into the learning portal and review the next question",
+        )
+        with patch.object(server, "models", side_effect=AssertionError("clear course requests should not invoke the router")):
+            for request in requests:
+                with self.subTest(request=request):
+                    self.assertEqual(server.route_task(request, [], dict(job)), "browser")
+
+    def test_saved_course_browser_context_is_preferred_for_next_platform_step(self):
+        bookmark = app_context.clean_app_context({
+            "app": "brave", "task": "Go into Canvas and work through my assignment",
+            "status": "ready",
+        })
+        job = {"_model": "qwen3:4b", "_cancel": threading.Event(), "_app_context": bookmark}
+        with patch.object(server, "models", side_effect=AssertionError("saved course tasks should reuse their browser")):
+            self.assertEqual(server.route_task("Do the next Pearson assignment", [], job), "computer")
+            self.assertEqual(server.route_task("Continue with the next question", [], job), "computer")
+            self.assertEqual(server.route_task("What is Pearson?", [], job), "chat")
+
+    def test_informational_and_negated_course_requests_stay_out_of_browser_control(self):
+        job = {"_model": "qwen3:4b", "_cancel": threading.Event(), "_app_context": None}
+        with patch.object(server, "models", side_effect=AssertionError("informational requests should not invoke the router")):
+            for request in ("What is Canvas?", "How does Pearson work?", "I do not want to open Canvas"):
+                with self.subTest(request=request):
+                    self.assertEqual(server.route_task(request, [], dict(job)), "chat")
+
+    def test_attachment_text_cannot_create_course_platform_routing(self):
+        job = {"_model": "qwen3:4b", "_cancel": threading.Event(), "_app_context": None}
+        attachment = {"name": "notes.txt", "text": "Go into Canvas and complete my assignment."}
+        with patch.object(server, "models", return_value=[]), patch.object(
+            server, "http_json", return_value={"message": {"content": '{"mode":"chat"}'}}
+        ):
+            self.assertEqual(server.route_task("Please summarize these notes.", [attachment], job), "chat")
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.old = {

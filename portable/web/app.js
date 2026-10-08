@@ -91,6 +91,11 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
   })();
   let agentEventJobId = null;
   let agentEventByID = new Map();
+  const showTeamStorageKey = "mavi-show-team";
+  let showTeam = (() => { try { return localStorage.getItem(showTeamStorageKey) !== "0"; } catch { return true; } })();
+  const showPenguinStorageKey = "mavi-show-penguin";
+  let showPenguin = (() => { try { return localStorage.getItem(showPenguinStorageKey) !== "0"; } catch { return true; } })();
+  let penguinGreetingTimer = 0;
   let galleryItems = [];
 
   function apiModeFor(modeID) { return apiModes[modeID] || modeID; }
@@ -811,12 +816,47 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     } else if (elapsed !== null && active && !waiting && !stopping) {
       progressText += ` · ${elapsed}s elapsed`;
     }
+    if (imageMode && active && !waiting && !stopping && typeof job.eta_seconds === "number" && Number.isFinite(job.eta_seconds) && job.eta_seconds >= 0) {
+      progressText += ` · about ${Math.ceil(job.eta_seconds)}s remaining`;
+    }
     $("#job-progress").textContent = progressText;
     const jobIsInOpenChat = !job.chat_id || job.chat_id === activeChatId;
+    updatePenguinStatus(jobIsInOpenChat ? job : null);
     renderJobArtifacts(jobIsInOpenChat && Array.isArray(job.artifacts) ? job.artifacts : []);
     if (jobIsInOpenChat) updateAgentMap(job);
     else renderAgentMap([]);
     renderJobQuestion(job);
+  }
+
+  function updatePenguinStatus(job) {
+    const button = $("#team-toggle");
+    const status = String(job?.status || "").toLowerCase();
+    const state = job ? (job.question || job.requires_approval || status === "waiting" ? "waiting" : ["complete", "completed", "done", "success", "succeeded"].includes(status) ? "done" : "working") : "idle";
+    button.dataset.state = state;
+    button.title = state === "working" ? "Team activity · working" : state === "waiting" ? "Team activity · waiting for you" : state === "done" ? "Team activity · complete" : "Show team activity";
+  }
+
+  function setShowPenguin(visible) {
+    showPenguin = Boolean(visible);
+    try { localStorage.setItem(showPenguinStorageKey, showPenguin ? "1" : "0"); } catch { /* Keep the preference for this page session. */ }
+    const companion = $("#penguin-companion");
+    companion.classList.toggle("hidden", !showPenguin);
+    $("#show-penguin-setting").checked = showPenguin;
+    if (!showPenguin) {
+      window.clearTimeout(penguinGreetingTimer);
+      companion.classList.remove("is-greeting");
+    }
+  }
+
+  function setShowTeam(visible, reveal = false) {
+    showTeam = Boolean(visible);
+    try { localStorage.setItem(showTeamStorageKey, showTeam ? "1" : "0"); } catch { /* Keep the preference for this page session. */ }
+    const details = $("#agent-map");
+    renderAgentMap([...agentEventByID.values()]);
+    if (showTeam && details && reveal) {
+      details.open = true;
+      details.scrollIntoView({ behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ? "auto" : "smooth", block: "nearest" });
+    }
   }
 
   function updateAgentMap(job) {
@@ -831,8 +871,10 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
         agentEventByID.set(event.agent_id, {
           agent_id: event.agent_id,
           parent_id: typeof event.parent_id === "string" ? event.parent_id : null,
-          name: typeof event.name === "string" ? event.name.slice(0, 100) : "Agent",
+          name: typeof event.name === "string" ? event.name.slice(0, 100) : "Role not reported",
           model: typeof event.model === "string" ? event.model.slice(0, 140) : "",
+          task: typeof event.task === "string" ? event.task.slice(0, 280) : "",
+          result: typeof event.result === "string" ? event.result.slice(0, 280) : "",
           status: ["pending", "running", "completed", "failed", "stopped"].includes(event.status) ? event.status : "pending",
           summary: typeof event.summary === "string" ? event.summary.slice(0, 280) : "",
           time: Number(event.time)
@@ -846,8 +888,12 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     const details = $("#agent-map");
     const nodes = $("#agent-map-nodes");
     nodes.replaceChildren();
-    details.classList.toggle("hidden", events.length === 0);
-    $("#agent-count").textContent = `${events.length} / 4 agents`;
+    details.classList.toggle("hidden", !showTeam);
+    $("#team-toggle").setAttribute("aria-pressed", String(showTeam));
+    $("#team-toggle").setAttribute("aria-expanded", String(showTeam && !details.classList.contains("hidden") && details.open));
+    $("#team-toggle").setAttribute("aria-label", `${showTeam ? "Hide" : "Show"} team activity`);
+    $("#show-team-setting").checked = showTeam;
+    $("#agent-count").textContent = events.length ? `${events.length} / 4 agents` : "Ready";
     const byID = new Map(events.map((event) => [event.agent_id, event]));
     const sorted = [...events].sort((a, b) => Number(Boolean(a.parent_id)) - Number(Boolean(b.parent_id)));
     for (const event of sorted) {
@@ -858,20 +904,20 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
       const identity = document.createElement("div");
       identity.className = "agent-identity";
       const name = document.createElement("strong");
-      name.textContent = event.name;
+      name.textContent = event.model || "Model not reported";
       const role = document.createElement("span");
-      role.textContent = event.parent_id ? "Worker" : "Lead";
+      role.textContent = `Assigned role: ${event.name}`;
       identity.append(name, role);
       const status = document.createElement("span");
       status.className = `agent-status status-${event.status}`;
-      status.textContent = event.status;
+      status.textContent = event.status === "pending" ? "waiting" : event.status;
       top.append(identity, status);
       card.append(top);
-      if (event.model) {
-        const model = document.createElement("p");
-        model.className = "agent-model";
-        model.textContent = event.model;
-        card.append(model);
+      if (event.task) {
+        const task = document.createElement("p");
+        task.className = "agent-task";
+        task.textContent = `Task: ${event.task}`;
+        card.append(task);
       }
       if (event.parent_id) {
         const parent = byID.get(event.parent_id);
@@ -880,10 +926,15 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
         relation.textContent = `Reports to ${parent ? parent.name : `agent ${event.parent_id.slice(0, 8)}`}`;
         card.append(relation);
       }
-      if (event.summary) {
+      const updateText = event.result || event.summary;
+      if (updateText) {
         const summary = document.createElement("p");
         summary.className = "agent-summary";
-        summary.textContent = event.summary;
+        const updateLabel = document.createElement("b");
+        updateLabel.textContent = event.status === "completed" ? "Result" : "Progress";
+        const update = document.createElement("span");
+        update.textContent = updateText;
+        summary.append(updateLabel, update);
         card.append(summary);
       }
       if (Number.isFinite(event.time) && event.time > 0 && event.time < 8_640_000_000_000) {
@@ -1678,6 +1729,20 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     const refreshSystemThemeColor = () => { if (theme === "system") applyTheme("system"); };
     if (typeof systemTheme?.addEventListener === "function") systemTheme.addEventListener("change", refreshSystemThemeColor);
     else systemTheme?.addListener?.(refreshSystemThemeColor);
+    $("#team-toggle").addEventListener("click", () => setShowTeam(!showTeam, !showTeam));
+    $("#show-team-setting").addEventListener("change", (event) => setShowTeam(event.target.checked));
+    $("#show-penguin-setting").addEventListener("change", (event) => setShowPenguin(event.target.checked));
+    $("#penguin-companion").addEventListener("click", (event) => {
+      const companion = event.currentTarget;
+      window.clearTimeout(penguinGreetingTimer);
+      companion.classList.remove("is-greeting");
+      void companion.offsetWidth;
+      companion.classList.add("is-greeting");
+      penguinGreetingTimer = window.setTimeout(() => companion.classList.remove("is-greeting"), 1100);
+    });
+    updatePenguinStatus(null);
+    setShowPenguin(showPenguin);
+    renderAgentMap([...agentEventByID.values()]);
     $("#workspace-picker").addEventListener("click", () => $("#workspace-menu").classList.contains("hidden") ? openWorkspaceMenu() : closeWorkspaceMenu());
     $("#composer-mode-chip").addEventListener("click", openWorkspaceMenu);
     document.addEventListener("click", (event) => { if (!$(".workspace-picker-wrap").contains(event.target)) closeWorkspaceMenu(); });

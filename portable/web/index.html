@@ -53,6 +53,7 @@
           </div>
         </div>
         <div class="topbar-right">
+          <button class="team-toggle" id="team-toggle" type="button" aria-controls="agent-map" aria-pressed="false" aria-label="Show team activity"><span>Team</span><i class="penguin-state" aria-hidden="true"></i></button>
           <div class="model-indicator" id="model-indicator"><span class="status-dot"></span><span>Checking local models…</span></div>
           <button class="icon-button" id="refresh-state" title="Refresh local status" aria-label="Refresh local status">↻</button>
           <button class="icon-button" id="theme-cycle" title="Change appearance" aria-label="Change appearance">◐</button>
@@ -80,13 +81,14 @@
           <div class="messages" id="messages" aria-live="polite"></div>
           <div class="job-card hidden" id="job-card" aria-live="polite">
             <div class="job-top"><span class="job-spinner" aria-hidden="true"></span><div><strong id="job-status">Working locally</strong><p id="job-progress">Mavi is working on your request.</p></div><button class="quiet-button stop-button" id="stop-job">Stop</button></div>
+            <div class="image-placeholder" role="img" aria-label="Image generation in progress"><span>Creating your image</span></div>
             <div class="progress-track" id="job-progress-track" role="progressbar" aria-label="Task progress"><span id="job-progress-bar"></span></div>
             <div class="job-question hidden" id="job-question"></div>
           </div>
           <div class="job-artifacts hidden" id="job-artifacts" aria-label="Task files"></div>
           <details class="agent-map hidden" id="agent-map">
             <summary><span>Agent activity</span><span class="agent-count" id="agent-count">0 / 4 agents</span></summary>
-            <p class="agent-map-note">Live status and short summaries reported by this task's agents.</p>
+            <p class="agent-map-note" id="agent-map-note">Models, assigned tasks, progress, and results.</p>
             <div class="agent-map-nodes" id="agent-map-nodes"></div>
           </details>
         </div>
@@ -124,6 +126,9 @@
           </details>
           <p class="composer-note" id="composer-note">Local AI can make mistakes. Review important details.</p>
         </div>
+        <button class="penguin-companion" id="penguin-companion" type="button" aria-label="Say hi to the penguin companion" title="Say hi">
+          <svg class="penguin-companion-art" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="penguin-companion-body" x1=".08" y1=".05" x2=".9" y2="1"><stop stop-color="#4b4c46"/><stop offset=".55" stop-color="#252622"/><stop offset="1" stop-color="#111210"/></linearGradient><linearGradient id="penguin-bib" x1="0" y1="0" x2=".3" y2="1"><stop stop-color="#fff"/><stop offset="1" stop-color="#e8e8e3"/></linearGradient></defs><ellipse cx="16" cy="38" rx="6" ry="11" transform="rotate(25 16 38)" fill="#292a26"/><ellipse cx="48" cy="38" rx="6" ry="11" transform="rotate(-25 48 38)" fill="#292a26"/><ellipse cx="24.8" cy="55.1" rx="6.2" ry="2.4" fill="#e67842"/><ellipse cx="39.2" cy="55.1" rx="6.2" ry="2.4" fill="#e67842"/><path d="M32 5C19.3 5 10.5 15.1 10.5 30c0 16 8.4 27 21.5 27s21.5-11 21.5-27C53.5 15.1 44.7 5 32 5Z" fill="url(#penguin-companion-body)"/><path d="M32 14c-8.2 0-13.4 7.3-13.4 16.9 0 11.2 5.1 18.2 13.4 18.2s13.4-7 13.4-18.2C45.4 21.3 40.2 14 32 14Z" fill="url(#penguin-bib)"/><ellipse class="penguin-eye penguin-eye-left" cx="26.7" cy="27.2" rx="1.8" ry="2.2" fill="#171816"/><ellipse class="penguin-eye penguin-eye-right" cx="37.3" cy="27.2" rx="1.8" ry="2.2" fill="#171816"/><circle cx="27.2" cy="26.5" r=".55" fill="#fff"/><circle cx="37.8" cy="26.5" r=".55" fill="#fff"/><path d="m32 29.8 4.4 3.4-4.4 2-4.4-2 4.4-3.4Z" fill="#e67842"/><path class="penguin-flipper" d="M12.3 35.5 6.5 44m45.2-8.5 5.8 8.5" stroke="#292a26" stroke-width="5.5" stroke-linecap="round"/></svg>
+        </button>
       </section>
 
       <section class="gallery-view view-panel hidden" id="gallery-view" aria-label="Generated files gallery">
@@ -149,6 +154,8 @@
               <button class="theme-option" data-theme-choice="light"><span class="theme-preview light-preview">☼</span><span>Light</span></button>
               <button class="theme-option" data-theme-choice="dark"><span class="theme-preview dark-preview">☾</span><span>Dark</span></button>
             </div>
+            <label class="team-preference"><input id="show-team-setting" type="checkbox"><span><b>Show team activity</b><small>Keep the agent map available in chat, even when no team is active.</small></span></label>
+            <label class="team-preference penguin-preference"><input id="show-penguin-setting" type="checkbox"><span><b>Show penguin companion</b><small>A small status companion that opens team activity.</small></span></label>
           </section>
           <section class="settings-card">
             <h2>Developer workspace</h2><p>Choose a local project folder for code tasks.</p>

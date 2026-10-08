@@ -20,7 +20,7 @@ mkdir -p "$app_path/Contents/Resources/Source"
 cp *.swift *.py *.sh *.plist *.js "$app_path/Contents/Resources/Source/"
 cp "$app_path/Contents/Resources/AppIcon.icns" "$app_path/Contents/Resources/Source/"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" "$app_path/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${MAVI_BUILD_NUMBER:-27}" "$app_path/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${MAVI_BUILD_NUMBER:-28}" "$app_path/Contents/Info.plist"
 # Strip only FinderInfo/resource-fork metadata that can prevent codesign.
 # Preserve quarantine and all other security attributes.
 /usr/bin/xattr -r -d com.apple.FinderInfo "$app_path" 2>/dev/null || true

@@ -28,7 +28,7 @@ Mavi asks macOS for Screen Recording, Accessibility, and microphone access only 
 Set version metadata and build the app plus a deterministic ZIP and SHA-256 sidecar:
 
 ```sh
-MAVI_VERSION=2.0.1 MAVI_BUILD_NUMBER=27 ./build.sh
+MAVI_VERSION=2.0.1 MAVI_BUILD_NUMBER=28 ./build.sh
 ```
 
 The outputs are `dist/Mavi-2.0.1.zip` and `dist/Mavi-2.0.1.zip.sha256`. The ZIP contains the `Mavi.app` bundle. Check the digest after downloading with:

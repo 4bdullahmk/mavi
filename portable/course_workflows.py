@@ -27,6 +27,19 @@ _FOLLOW_UP = re.compile(
 _ACCOUNTING = re.compile(r"\b(accounting|accountancy)\b", re.I)
 _SMARTBOOK = re.compile(r"\bsmart\s*book\b", re.I)
 
+INTERACTIVE_TASK_GUIDANCE = (
+    " A short user request is a goal, not a requirement for step-by-step instructions."
+    " Inspect the current app/page, identify the task, available controls, and current progress,"
+    " then perform the next relevant action and verify the result. Adapt when the page changes."
+    " Use visible tabs, links, menus, instructions, and supplied attachments to discover the workflow;"
+    " do not invent controls or destination URLs. If the requested assignment is uniquely identified"
+    " by the current context, continue without asking the user to teach its interface. Ask a concise"
+    " question only when a real ambiguity, missing material, or private sign-in prevents progress."
+    " An unfamiliar platform calls for inspection, not a canned claim that computer control is unavailable."
+    " Reuse verified observations in this task, keep updates short, and finish the user's requested scope"
+    " rather than stopping after merely opening the app. Stop promptly when the user presses Stop."
+)
+
 COURSE_MATERIALS_GUIDANCE = (
     " For class assignments and course sites, base answers only on materials the user supplies"
     " or the course assigns, such as the prompt, readings, lecture notes, rubric, or instructor"
@@ -47,7 +60,10 @@ CONNECT_ACCOUNTING_GUIDANCE = (
 SMARTBOOK_GUIDANCE = (
     " For SmartBook, use its assigned reading and visible question feedback to teach the concept."
     " Offer a hint or similar practice example when useful; do not guess unseen course content or"
-    " manipulate completion or progress."
+    " manipulate completion or progress. When asked to work through the entire practice workbook,"
+    " keep answering and advancing until the activity finishes or the user presses Stop; do not"
+    " impose a one-question limit. Consult Read About the Concept or the assigned reading for"
+    " each new concept, reuse already verified class-source notes, and give brief progress updates."
 )
 
 

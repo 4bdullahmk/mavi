@@ -3,6 +3,62 @@ import re
 
 APP_NAMES = {'discord':'Discord','brave':'Brave','chrome':'Chrome','safari':'Safari','edge':'Edge','firefox':'Firefox','webex':'Webex','zoom':'Zoom','teams':'Teams','finder':'Finder','textedit':'TextEdit','preview':'Preview','word':'Word','excel':'Excel','explorer':'File Explorer','notepad':'Notepad'}
 _APPROVAL_RECOVERY = re.compile(r"^(?:(?:k|ok|okay|yes|sure|all right)[, ]+)?(?:i\s+)?(?:approve(?:\s+all)?|give\s+(?:you\s+)?permission(?:\s+to\s+(?:continue|proceed))?|authorize(?:\s+you)?|you\s+have\s+my\s+permission|you\s+can\s+(?:continue|proceed)|go\s+ahead|continue)(?:\s+with\s+(?:the\s+)?(?:task|app|browser|computer|previous task))?[.! ]*$", re.I)
+_COURSE_PLATFORM = re.compile(
+    r"\b(canvas|pearson|mcgraw\s*-?\s*hill|smart\s*book|connect\s+courseware|"
+    r"(?:course|class|school|learning|student)\s+(?:site|website|portal|platform)|lms)\b",
+    re.I,
+)
+_COURSE_ACTION = re.compile(
+    r"\b(open|launch|go|navigate|visit|browse|start|continue|check|read|find|search|resume|"
+    r"work|work through|do|complete|finish|answer|review|solve|practice|help me with)\b",
+    re.I,
+)
+_COURSE_QUESTION = re.compile(
+    r"^\s*(?:how|what|why|when|who|where|compare|explain|describe|should i|do you think|tell me how)\b",
+    re.I,
+)
+_COURSE_NEGATION = re.compile(
+    r"\b(?:do not|don't|never|avoid)\b.{0,60}\b(?:open|launch|go|navigate|visit|browse|work|continue|start)\b",
+    re.I,
+)
+_BROWSER_APP_KEYS = {"brave", "chrome", "safari", "edge", "firefox"}
+
+
+def _unquoted_user_text(text: str) -> str:
+    return re.sub(r"(?s)(`[^`]*`|'[^']*'|\"[^\"]*\")", " ", text)
+
+
+def is_course_platform_question(text: str) -> bool:
+    """Keep informational course-platform questions in chat across platforms."""
+    if not isinstance(text, str):
+        return False
+    clean = _unquoted_user_text(text).strip()
+    return bool(_COURSE_QUESTION.search(clean) and _COURSE_PLATFORM.search(clean))
+
+
+def is_course_platform_request(text: str) -> bool:
+    """Recognize explicit user requests to use a course site or supplied HTTPS link."""
+    if not isinstance(text, str):
+        return False
+    clean = _unquoted_user_text(text).strip()
+    if not clean or _COURSE_QUESTION.search(clean) or _COURSE_NEGATION.search(clean):
+        return False
+    has_https_link = bool(re.search(r"(?i)https://[^\s<>()\"']+", clean))
+    has_platform = bool(_COURSE_PLATFORM.search(clean))
+    return bool((has_platform or has_https_link) and _COURSE_ACTION.search(clean))
+
+
+def is_saved_course_platform_followup(text: str, bookmark: object) -> bool:
+    """Continue a course task in its already selected browser when the user asks for the next step."""
+    saved = clean_app_context(bookmark)
+    if not saved or saved["app"] not in _BROWSER_APP_KEYS:
+        return False
+    if not re.search(r"(?i)\b(canvas|pearson|mcgraw\s*-?\s*hill|smart\s*book|connect|course|assignment|homework)\b", saved["task"]):
+        return False
+    return is_course_platform_request(text) or bool(re.search(
+        r"(?i)^\s*(?:do|answer|complete|finish|work through|continue|review)\b.{0,50}\b(?:next|another|remaining|assignment|homework|question|problem|chapter)\b",
+        _unquoted_user_text(text),
+    ))
 
 def clean_app_context(value):
     if not isinstance(value, dict) or value.get('app') not in APP_NAMES:
