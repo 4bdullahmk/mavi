@@ -1,6 +1,6 @@
 # Mavi contributor and setup instructions
 
-- This is a public-source development candidate. Do not claim complete Windows feature parity or publish a finished release until the target Windows checks in WINDOWS.md are satisfied.
+- Mavi 2.0.0 has a macOS desktop release and a Windows source/setup package. Do not claim verified Windows execution or complete platform parity until the target Windows checks in WINDOWS.md are satisfied. Keep unverified platform capabilities explicit in release notes.
 - For a recipient's one-prompt Windows installation, follow INSTALL_WITH_CODEX.md and the official Install-Mavi.cmd / Install-Mavi.ps1 path. Inspect hardware before model selection, keep user state under that user's %LOCALAPPDATA%\Mavi, and distinguish installer smoke checks from release qualification. Do not upload or publish from setup.
 - Never copy another installation's data into source or a release: no chats, profile notes, training data, adapters, model weights, logs, credentials, browser profiles or absolute personal home paths.
 - Data belongs in the current user's local Mavi data directory. A fresh install starts with empty user data and personalization off.

@@ -2,7 +2,7 @@ import http.client, importlib.util, json, pathlib, sys, tempfile, threading, tim
 from unittest.mock import patch
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'portable'))
-import server, discord_branding
+import server, discord_branding, windows_automation
 
 class WorkspaceTests(unittest.TestCase):
     @classmethod
@@ -132,7 +132,8 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(server.route_task('Create a text file named mavi-check.txt',[],job),'files')
     def test_explicit_app_and_link_routes_without_model(self):
         job={'_model':'qwen3:8b','_cancel':threading.Event()}
-        with patch.object(server,'models',side_effect=AssertionError('explicit target should not call the router')):
+        with patch.object(server,'automation_backend',return_value=windows_automation), \
+             patch.object(server,'models',side_effect=AssertionError('explicit target should not call the router')):
             self.assertEqual(server.route_task('Open Brave and visit https://example.com',[],job),'browser')
             self.assertEqual(server.route_task('Work in Webex and review the meeting window',[],job),'computer')
             self.assertEqual(server.route_task('Open File Explorer and find the report',[],job),'computer')

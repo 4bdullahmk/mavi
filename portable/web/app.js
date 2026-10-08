@@ -145,6 +145,10 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
   function applyTheme(nextTheme) {
     theme = ["system", "light", "dark"].includes(nextTheme) ? nextTheme : "system";
     document.documentElement.dataset.theme = theme;
+    const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches === true;
+    const darkTheme = theme === "dark" || (theme === "system" && prefersDark);
+    const themeColor = $('meta[name="theme-color"]');
+    if (themeColor) themeColor.content = darkTheme ? "#111210" : "#f5f5f3";
     $$("[data-theme-choice]").forEach((button) => button.classList.toggle("active", button.dataset.themeChoice === theme));
   }
 
@@ -210,6 +214,7 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     const ready = capabilityFor(currentMode).available && !(activeJob && !["chat", "browser", "computer"].includes(activeJob.mode));
     const surpriseReady = isLocalSurpriseRequest($("#composer-input")?.value || "");
     renderAutomationApprovalControls();
+    renderChatContext();
     $("#send-button").disabled = (!ready && !surpriseReady) || Boolean(recording);
     const recordButton = $("#record-button");
     const dictation = capabilityFor("dictation");
@@ -299,16 +304,22 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
   function renderAutomationApprovalControls() {
     const fieldset = $("#automation-approval");
     const scopeFieldset = $("#automation-scope");
-    if (!fieldset || !scopeFieldset) return;
+    const details = $("#automation-control-details");
+    if (!fieldset || !scopeFieldset || !details) return;
     const visible = !activeJob && ["auto", "browser", "computer"].includes(currentMode) && capabilityFor("computer").available;
+    details.classList.toggle("hidden", !visible);
     fieldset.classList.toggle("hidden", !visible);
     scopeFieldset.classList.toggle("hidden", !visible);
     if (!visible) {
+      details.open = false;
       const askEach = fieldset.querySelector('input[name="automation-policy"][value="ask_each"]');
       if (askEach) askEach.checked = true;
       const singleApp = scopeFieldset.querySelector('input[name="automation-scope"][value="single_app"]');
       if (singleApp) singleApp.checked = true;
     }
+    const policy = fieldset.querySelector('input[name="automation-policy"]:checked')?.value;
+    const scope = scopeFieldset.querySelector('input[name="automation-scope"]:checked')?.value;
+    $("#automation-control-summary-state").textContent = `${policy === "routine_navigation" ? "Routine navigation" : "Ask each action"} · ${scope === "whole_computer" ? "approved app switches" : "selected app"}`;
   }
 
   function formatSize(value) {
@@ -490,8 +501,67 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     const chat = state?.chats?.find((item) => item.id === activeChatId);
     const items = Array.isArray(chat?.messages) ? chat.messages : [];
     $("#welcome-state").classList.toggle("hidden", items.length > 0);
+    renderChatContext();
     for (const item of items) appendMessage(item.role, item.content, [], item.status);
     scrollToBottom();
+  }
+
+  function selectedChat() {
+    return state?.chats?.find((item) => item.id === activeChatId) || null;
+  }
+
+  function renderChatContext() {
+    const banner = $("#chat-context-banner");
+    if (!banner) return;
+    const context = selectedChat()?.app_context;
+    const name = typeof context?.name === "string" ? context.name.trim().slice(0, 100) : "";
+    const task = typeof context?.task === "string" ? context.task.trim().slice(0, 240) : "";
+    const visible = Boolean(name && typeof context?.app === "string");
+    banner.classList.toggle("hidden", !visible);
+    if (!visible) return;
+    $("#chat-context-name").textContent = name;
+    $("#chat-context-task").textContent = task;
+    const continueButton = $("#continue-app-context");
+    const ready = capabilityFor("auto").available && !activeJob;
+    continueButton.textContent = `Continue in ${name}`;
+    continueButton.disabled = !ready;
+    continueButton.title = ready ? `Continue the previous task in ${name}` : (activeJob ? "Wait for the active task to finish first." : "A local model is required to continue this task.");
+  }
+
+  async function continueAppContext() {
+    if (!selectedChat()?.app_context || !activeChatId) return;
+    if (activeJob) { showToast("Wait for the active task to finish before continuing this app context."); return; }
+    if (!capabilityFor("auto").available) { showToast("A local model is required to continue this task."); return; }
+    const input = $("#composer-input");
+    if (input.value.trim() || attachments.length) {
+      showToast("Send or clear your draft and attachments before continuing the previous task.");
+      input.focus();
+      return;
+    }
+    if (currentMode !== "auto") chooseMode("auto");
+    if (currentMode !== "auto") return;
+    const askEach = $("#automation-approval input[name='automation-policy'][value='ask_each']");
+    const singleApp = $("#automation-scope input[name='automation-scope'][value='single_app']");
+    if (askEach) askEach.checked = true;
+    if (singleApp) singleApp.checked = true;
+    await sendMessage("Continue the previous task");
+  }
+
+  async function clearAppContext() {
+    if (!activeChatId || !selectedChat()?.app_context) return;
+    const button = $("#clear-app-context");
+    button.disabled = true;
+    try {
+      await post("/chat-context", { chat_id: activeChatId, clear: true });
+      const chat = selectedChat();
+      if (chat) chat.app_context = null;
+      renderChatContext();
+      showToast("App context cleared. This chat will continue as general chat.");
+    } catch (error) {
+      showToast(error.message || "Could not clear this chat’s app context.");
+    } finally {
+      button.disabled = false;
+    }
   }
 
   function appendMessage(role, content, files = [], taskStatus = "failed") {
@@ -545,6 +615,7 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
 
   function selectChat(id) {
     activeChatId = id;
+    localStorage.setItem("mavi-active-chat", id);
     if (activeJob?.chat_id !== id) renderJobArtifacts([]);
     if (activeJob?.chat_id !== id) renderAgentMap([]);
     currentView = "chat";
@@ -556,6 +627,7 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
 
   function newChat() {
     activeChatId = null;
+    localStorage.setItem("mavi-active-chat", "__new__");
     renderJobArtifacts([]);
     renderAgentMap([]);
     currentView = "chat";
@@ -624,7 +696,13 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
       applyTheme(theme);
       const chats = Array.isArray(state.chats) ? state.chats : [];
       if (activeChatId && !chats.some((chat) => chat.id === activeChatId)) activeChatId = null;
-      if (!activeChatId && chats.length && first) activeChatId = chats[0].id;
+      if (first) {
+        const savedChat = localStorage.getItem("mavi-active-chat");
+        if (savedChat === "__new__") activeChatId = null;
+        else if (savedChat && chats.some((chat) => chat.id === savedChat)) activeChatId = savedChat;
+        else if (!activeChatId && chats.length) activeChatId = chats[0].id;
+        localStorage.setItem("mavi-active-chat", activeChatId || "__new__");
+      }
       renderChats();
       if (first || !$("#messages").children.length) renderCurrentChat();
       discordStatusPollTimedOut = false;
@@ -670,6 +748,7 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     const bar = $("#job-progress-bar");
     const spinner = $(".job-spinner", card);
     if (!job) {
+      renderJobQuestion(null);
       card.classList.add("hidden");
       card.classList.remove("image-generating");
       track.classList.remove("is-indeterminate");
@@ -935,16 +1014,28 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
 
   function renderJobQuestion(job) {
     const container = $("#job-question");
-    const prompt = typeof job.question === "string" ? job.question : (job.question?.text || job.question?.prompt || "");
-    if (!prompt && !job.requires_approval) { container.classList.add("hidden"); container.replaceChildren(); return; }
+    const question = job?.question;
+    const prompt = typeof question === "string" ? question :
+      (typeof question?.text === "string" ? question.text : (typeof question?.prompt === "string" ? question.prompt : ""));
+    const requiresApproval = Boolean(job?.requires_approval);
+    if (!prompt && !requiresApproval) {
+      container.classList.add("hidden");
+      container.replaceChildren();
+      delete container.dataset.questionKey;
+      return;
+    }
+    const jobID = typeof job?.id === "string" ? job.id : (typeof activeJob?.id === "string" ? activeJob.id : "");
+    const questionKey = JSON.stringify([jobID, prompt, requiresApproval]);
     container.classList.remove("hidden");
+    if (container.dataset.questionKey === questionKey) return;
+    container.dataset.questionKey = questionKey;
     container.replaceChildren();
     const p = document.createElement("p");
     p.textContent = String(prompt || "Mavi is asking for your approval before continuing.");
     container.append(p);
     const actions = document.createElement("div");
     actions.className = "job-question-actions";
-    if (job.requires_approval) {
+    if (requiresApproval) {
       const deny = document.createElement("button");
       deny.className = "quiet-button"; deny.type = "button"; deny.textContent = "Decline";
       deny.addEventListener("click", () => answerJob("decline"));
@@ -1091,9 +1182,9 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     dialog.showModal();
   }
 
-  async function sendMessage() {
+  async function sendMessage(messageOverride = null) {
     const input = $("#composer-input");
-    const text = input.value.trim();
+    const text = typeof messageOverride === "string" ? messageOverride.trim() : input.value.trim();
     if (!text && !attachments.length) return;
     if (recording) { showToast("Stop the microphone recording before sending."); return; }
     // The author explicitly chose to ship this Easter egg in every public package.
@@ -1146,6 +1237,7 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
       const result = await post("/chat", payload);
       if (result.chat_id) {
         activeChatId = result.chat_id;
+        localStorage.setItem("mavi-active-chat", result.chat_id);
         const optimistic = state?.chats?.find((chat) => chat.id === draftChatID);
         if (optimistic) optimistic.id = result.chat_id;
       }
@@ -1234,7 +1326,10 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     if (!window.confirm(`Delete “${chat?.title || "this chat"}” from this local workspace?`)) return;
     try {
       await post("/chat/delete", { chat_id: chatID });
-      if (activeChatId === chatID) activeChatId = null;
+      if (activeChatId === chatID) {
+        activeChatId = null;
+        localStorage.setItem("mavi-active-chat", "__new__");
+      }
       await loadState({ syncJob: false });
       renderCurrentChat();
       showToast("Chat deleted from this workspace.");
@@ -1246,6 +1341,7 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     try {
       await post("/clear-history", {});
       activeChatId = null;
+      localStorage.setItem("mavi-active-chat", "__new__");
       await loadState({ syncJob: false });
       renderCurrentChat();
       showToast("Chat history cleared.");
@@ -1559,6 +1655,10 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
   function closeMobileSidebar() { toggleSidebar(false); }
 
   function wireEvents() {
+    const systemTheme = window.matchMedia?.("(prefers-color-scheme: dark)");
+    const refreshSystemThemeColor = () => { if (theme === "system") applyTheme("system"); };
+    if (typeof systemTheme?.addEventListener === "function") systemTheme.addEventListener("change", refreshSystemThemeColor);
+    else systemTheme?.addListener?.(refreshSystemThemeColor);
     $("#workspace-picker").addEventListener("click", () => $("#workspace-menu").classList.contains("hidden") ? openWorkspaceMenu() : closeWorkspaceMenu());
     $("#composer-mode-chip").addEventListener("click", openWorkspaceMenu);
     document.addEventListener("click", (event) => { if (!$(".workspace-picker-wrap").contains(event.target)) closeWorkspaceMenu(); });
@@ -1576,6 +1676,9 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     $$("[data-theme-choice]").forEach((button) => button.addEventListener("click", () => saveThemeChoice(button.dataset.themeChoice)));
     $("#model-select").addEventListener("change", saveSelectedModel);
     $("#composer-form").addEventListener("submit", (event) => { event.preventDefault(); sendMessage(); });
+    $("#automation-control-details").addEventListener("change", renderAutomationApprovalControls);
+    $("#continue-app-context").addEventListener("click", continueAppContext);
+    $("#clear-app-context").addEventListener("click", clearAppContext);
     $("#composer-input").addEventListener("input", () => { resizeComposer(); renderModelStatus(); });
     $("#composer-input").addEventListener("keydown", (event) => {
       if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); sendMessage(); }

@@ -5,6 +5,7 @@ import argparse, base64, csv, hashlib, http.cookies, io, json, mimetypes, os, pl
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from model_policy import prepare_messages, strip_thinking, ThinkingFilter
+from app_context import clean_app_context, is_app_followup
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_DATA = Path(os.environ.get('LOCALAPPDATA', Path.home() / '.local/share')) / 'Mavi'
@@ -52,6 +53,11 @@ def load():
             if key in saved: STATE[key] = saved[key]
         saved_settings = saved.get('settings', {})
         STATE['settings'] = {**json.loads(json.dumps(DEFAULT_SETTINGS)), **(saved_settings if isinstance(saved_settings, dict) else {})}
+    for chat in STATE.get('chats', []):
+        if isinstance(chat, dict):
+            bookmark = clean_app_context(chat.get('app_context'))
+            if bookmark: chat['app_context'] = bookmark
+            else: chat.pop('app_context', None)
     # Discord credentials are intentionally memory-only. A launch restores only
     # validated identifiers and always requires a fresh token and explicit enable.
     DISCORD_STOP.set()
@@ -152,6 +158,14 @@ def artifact_inventory():
     return sorted(found, key=lambda item: item['created'], reverse=True)
 
 
+def automation_backend():
+    if sys.platform == 'darwin':
+        import macos_automation
+        return macos_automation
+    import windows_automation
+    return windows_automation
+
+
 def capabilities():
     result = {'chat': {'available': bool(models()), 'reason': 'Install and start Ollama, then download a standard chat model.'}}
     try:
@@ -161,9 +175,10 @@ def capabilities():
         result['files'] = {'available': True, 'reason': ''}
     import image_runtime
     result['image'] = image_runtime.capabilities(DATA)
-    import dictation_runtime, windows_automation
+    import dictation_runtime
     result['dictation'] = dictation_runtime.capability(DATA)
-    auto = windows_automation.capability()
+    try: auto = automation_backend().capability()
+    except (ImportError, OSError) as error: auto = {'available': False, 'reason': 'Desktop automation helper is unavailable. Install or open the desktop app.'}
     vision = [x['name'] for x in models() if '-vl' in x['name'].lower() or 'vision' in x['name'].lower() or 'llava' in x['name'].lower()]
     if not vision: auto={'available':False,'reason':'Install a standard local vision model, such as qwen3-vl:8b, for screen tasks.'}
     result['browser'] = result['computer'] = auto
@@ -243,12 +258,13 @@ def route_task(text, attachments, job):
     if re.search(r'\b(create|write|save|export|generate|make)\b.*\b(file|pdf|doc|docx|xlsx|spreadsheet|excel|workbook|presentation|powerpoint|pptx|document|csv)\b',lower): return 'files'
     if any(Path(x['name']).suffix.lower() in ('.pdf','.docx','.xlsx','.pptx') for x in attachments): return 'files'
     if re.search(r'\b(edit|improve|update|change)\s+(yourself|mavi)\b',lower): return 'update'
-    import windows_automation
-    if windows_automation.is_informational_app_question(text): return 'chat'
-    explicit_target = windows_automation.route_explicit_target(text)
+    automation = automation_backend()
+    if automation.is_informational_app_question(text): return 'chat'
+    explicit_target = automation.route_explicit_target(text)
     if explicit_target:
         return explicit_target
-    if windows_automation.has_unresolved_app_reference(text): return 'chat'
+    if is_app_followup(text, job.get('_app_context')): return 'computer'
+    if automation.has_unresolved_app_reference(text): return 'chat'
     available=models()
     router=next((x['name'] for x in available if x['name'] in ('qwen3:4b','qwen3:8b')),job['_model'])
     choices=['chat','files','developer','image','cad','browser','computer','stocks','update','dictation','workers']
@@ -333,6 +349,7 @@ def new_job(body, owner='local'):
         chat['messages'].append({'role': 'user', 'content': text})
         model = chosen_model
         job = {'id': uuid.uuid4().hex, 'chat_id': chat['id'], 'status': 'queued', 'progress': 'Starting local model…', 'content': '', 'error': '', 'mode': mode, 'agent_events':[], 'started': time.time(), '_cancel': threading.Event(), '_owner': owner, '_steer': [], '_model': model, '_answer_event': threading.Event(), '_answer': '', '_automation_policy': automation_policy if owner == 'local' else 'ask_each', '_automation_scope': automation_scope if owner == 'local' else 'single_app'}
+        job['_app_context'] = clean_app_context(chat.get('app_context')) if owner == 'local' else None
         ACTIVE = job['id']; JOBS[ACTIVE] = job; persist()
         # Keep bounded task metadata in memory; transcripts are separately stored.
         for key in list(JOBS):
@@ -357,6 +374,15 @@ def run_job(job, chat, text, attachments):
         def drain_steer():
             with LOCK:
                 values=list(job['_steer']);job['_steer'].clear();return values
+        def remember_app_context(value):
+            if job.get('_owner') != 'local': return
+            bookmark = clean_app_context(value)
+            if bookmark is None: raise ValueError('Invalid app context')
+            with LOCK:
+                if not any(item is chat for item in STATE['chats']): return
+                chat['app_context'] = bookmark
+                job['_app_context'] = dict(bookmark)
+                persist()
         def ask(question):
             with LOCK:
                 job['question']=str(question)[:16000];job['status']='waiting';job['progress']='Waiting for your response';job['_answer_event'].clear()
@@ -364,15 +390,19 @@ def run_job(job, chat, text, attachments):
                 if job['_cancel'].is_set(): raise InterruptedError('Stopped')
             with LOCK:
                 job['status']='running';job.pop('question',None);return job['_answer']
-        if job['mode']=='auto':
+        if job['mode']=='auto' or (job['mode']=='chat' and is_app_followup(text, job.get('_app_context'))):
             progress('Choosing the local workspace…')
             job['mode']=route_task(text,attachments,job)
             progress('Working in '+job['mode'])
         if job['mode'] in ('browser','computer'):
-            vision=[x['name'] for x in models() if '-vl' in x['name'].lower() or 'vision' in x['name'].lower() or 'llava' in x['name'].lower()]
-            if not vision: raise ValueError('Install a standard vision model for screen tasks')
-            job['_model']=vision[0]
+            bare_open = getattr(automation_backend(), 'is_bare_open', lambda _: False)(text)
+            if not bare_open:
+                vision=[x['name'] for x in models() if '-vl' in x['name'].lower() or 'vision' in x['name'].lower() or 'llava' in x['name'].lower()]
+                if not vision: raise ValueError('Install a standard vision model for screen tasks')
+                job['_model']=vision[0]
         context={'data_dir':DATA,'model':job['_model'],'call_model':model_call,'progress':progress,'cancelled':job['_cancel'],'project_path':STATE['settings'].get('project_path',''),'ask':ask,'agent_event':agent_event,'drain_steer':drain_steer,'automation_policy':job.get('_automation_policy','ask_each'),'automation_scope':job.get('_automation_scope','single_app')}
+        context['app_context'] = job.get('_app_context')
+        context['remember_app_context'] = remember_app_context
         outputs=DATA/'outputs'
         before={str(x):x.stat().st_mtime_ns for x in outputs.glob('*') if x.is_file()} if outputs.is_dir() else {}
 
@@ -390,8 +420,7 @@ def run_job(job, chat, text, attachments):
                 messages.extend([{'role': 'assistant', 'content': result}, {'role': 'user', 'content': steer}])
                 progress('Applying your follow-up instruction…'); result = model_call(messages[-24:])
         elif job['mode'] in ('browser','computer'):
-            import windows_automation
-            result=windows_automation.run(text,attachments,context,browser=job['mode']=='browser')
+            result=automation_backend().run(text,attachments,context,browser=job['mode']=='browser')
         elif job['mode']=='dictation':
             import dictation_runtime
             result=dictation_runtime.run(attachments,context)
@@ -718,6 +747,16 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(body,dict): raise ValueError('Expected a JSON object')
             path=urllib.parse.urlsplit(self.path).path
             if path=='/api/chat': return self.send(new_job(body))
+            if path=='/api/chat-context':
+                if body.get('clear') is not True: raise ValueError('Only clearing app context is allowed here')
+                with LOCK:
+                    chat_id = str(body.get('chat_id',''))
+                    chat = next((item for item in STATE['chats'] if item['id'] == chat_id), None)
+                    if chat is None: raise ValueError('Unknown conversation')
+                    if any(job['chat_id']==chat_id and job['status'] in ('queued','running','waiting') for job in JOBS.values()):
+                        raise ValueError('Stop the current task before clearing its app context')
+                    chat.pop('app_context',None); persist()
+                return self.send({'ok':True})
             if path in ('/api/stop','/api/steer','/api/answer'):
                 with LOCK:
                     job=JOBS.get(str(body.get('job_id','')))

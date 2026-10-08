@@ -1,5 +1,15 @@
 # Mavi changes
 
+## 2.0.0 — desktop web workspace and task continuation
+
+- Add a macOS desktop wrapper for the portable web workspace with local runtime setup and stable workspace storage.
+- Add macOS app and browser task routing, including Canvas requests, with normal browser profiles, private sign-in handoffs, and reviewed input actions.
+- Continue compound tasks after opening their app, retaining bounded task progress per chat while reacquiring current windows.
+- Add a chat context indicator, Continue action, and option to return to general chat. App context does not retain computer-control permissions.
+- Keep long histories within the sidebar and group computer-control settings in a compact disclosure; align startup branding and light/dark window colors.
+- Preserve typed approval answers during progress updates and support immediate clean app restarts without mistaking TCP cleanup for an occupied port.
+- Add regression coverage for platform routing, compound tasks, context isolation, cancellation, and login handoffs. Windows hardware qualification remains pending.
+
 ## 2.0.0-preview.5 — Mac application routing
 
 - Route explicit Discord launch requests to the installed macOS application before model planning.

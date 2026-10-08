@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <meta name="theme-color" content="#f4f4f2">
+  <meta name="theme-color" content="#f5f5f3">
   <title>Mavi — Local AI workspace</title>
   <link rel="icon" type="image/png" href="mavi-mark.png">
   <link rel="stylesheet" href="app.css">
@@ -61,6 +61,10 @@
       </header>
 
       <section class="chat-view view-panel" id="chat-view" aria-label="Chat workspace">
+        <section class="chat-context-banner hidden" id="chat-context-banner" aria-label="Saved app context">
+          <div class="chat-context-copy"><span class="chat-context-kicker">SAVED APP CONTEXT</span><strong id="chat-context-name"></strong><span id="chat-context-task"></span></div>
+          <div class="chat-context-actions"><button class="quiet-button" id="continue-app-context" type="button">Continue in app</button><button class="quiet-button" id="clear-app-context" type="button">Use general chat</button></div>
+        </section>
         <div class="message-scroll" id="message-scroll">
           <div class="welcome-state" id="welcome-state">
             <div class="welcome-symbol" aria-hidden="true"><img src="mavi-mark.png" alt=""></div>
@@ -102,18 +106,23 @@
               <div class="composer-actions"><span class="enter-hint">Enter to send · Shift+Enter for new line</span><button class="send-button" id="send-button" type="submit" aria-label="Send message" title="Send message">↑</button></div>
             </div>
           </form>
-          <fieldset class="automation-approval hidden" id="automation-approval" aria-describedby="automation-approval-note">
-            <legend>Browser and computer action approvals · this task</legend>
-            <label><input type="radio" name="automation-policy" value="ask_each" checked> Ask before each action</label>
-            <label><input type="radio" name="automation-policy" value="routine_navigation"> Allow routine navigation</label>
-            <p id="automation-approval-note">Routine mode may scroll or open an ordinary navigation link, tab, or menu without repeating the prompt. Mavi still asks before typing, submitting, messaging, signing in, saving, or changing data or security. Every task still asks before reading or operating the selected window; this choice applies to this task only.</p>
-          </fieldset>
-          <fieldset class="automation-approval hidden" id="automation-scope" aria-describedby="automation-scope-note">
-            <legend>Window scope · this task</legend>
-            <label><input type="radio" name="automation-scope" value="single_app" checked> Stay in the selected app</label>
-            <label><input type="radio" name="automation-scope" value="whole_computer"> Allow approved app switches</label>
-            <p id="automation-scope-note">Single-app is the default. Whole-computer scope supports browsers, Webex, File Explorer, Notepad, Word, and Excel. Each app switch needs a separate approval; Mavi verifies the app window before reading it. Focus changes never switch targets automatically.</p>
-          </fieldset>
+          <details class="automation-control-details hidden" id="automation-control-details">
+            <summary><span>Computer control</span><span class="automation-control-summary-state" id="automation-control-summary-state">Ask each action · selected app</span></summary>
+            <div class="automation-control-body">
+              <fieldset class="automation-approval hidden" id="automation-approval" aria-describedby="automation-approval-note">
+                <legend>Approvals · this task</legend>
+                <label><input type="radio" name="automation-policy" value="ask_each" checked> Ask before each action</label>
+                <label><input type="radio" name="automation-policy" value="routine_navigation"> Allow routine navigation</label>
+                <p id="automation-approval-note">Routine mode may scroll or open an ordinary navigation link, tab, or menu without repeating the prompt. Mavi still asks before typing, submitting, messaging, signing in, saving, or changing data or security. Every task still asks before reading or operating the selected window; this choice applies to this task only.</p>
+              </fieldset>
+              <fieldset class="automation-approval hidden" id="automation-scope" aria-describedby="automation-scope-note">
+                <legend>Window scope · this task</legend>
+                <label><input type="radio" name="automation-scope" value="single_app" checked> Stay in the selected app</label>
+                <label><input type="radio" name="automation-scope" value="whole_computer"> Allow approved app switches</label>
+                <p id="automation-scope-note">Single-app is the default. Whole-computer scope supports browsers, Webex, File Explorer, Notepad, Word, and Excel. Each app switch needs a separate approval; Mavi verifies the app window before reading it. Focus changes never switch targets automatically.</p>
+              </fieldset>
+            </div>
+          </details>
           <p class="composer-note" id="composer-note">Local AI can make mistakes. Review important details.</p>
         </div>
       </section>
