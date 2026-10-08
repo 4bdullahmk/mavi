@@ -2,13 +2,17 @@
 
 A local AI workspace for conversation, files, development and creative tools. A clean installation contains no personal profile, conversation history, training examples, adapters, credentials or model weights.
 
-**Mavi 2.0.0** provides a macOS desktop app and a Windows source/setup package. The macOS app uses the same web workspace as the portable client, with a separate macOS automation adapter. Windows execution and hardware features have not been tested on a Windows machine. The Mac download is not Apple-notarized. See [Mac setup](README-Mac.md) and [Windows readiness](WINDOWS.md) for requirements and verification limits.
+**Mavi 2.0.1** provides a macOS desktop app and a Windows source/setup package. The macOS app uses the same web workspace as the portable client, with a separate macOS automation adapter. Windows execution and hardware features have not been tested on a Windows machine. The Mac download is not Apple-notarized. See [Mac setup](README-Mac.md) and [Windows readiness](WINDOWS.md) for requirements and verification limits.
 
 ## macOS desktop
 
 See [Mavi for macOS](README-Mac.md) for the standalone web interface, local Python setup, and update instructions. The desktop app stores workspace data in Application Support, outside the application bundle.
 
 For browser tasks, specify the site and goal, for example: “Go into Canvas and open the assignment for my course.” Mavi uses the normal default browser and asks for the course or assignment link when it is unclear. It pauses for private sign-in and approvals. macOS requires Screen Recording and Accessibility permissions, and screen tasks need a local vision model. Each chat can retain its selected app and task progress; returning to that chat reacquires the current window. Saved task context never grants permission to control the computer.
+
+## Course workflow guidance
+
+For McGraw Hill Connect accounting and SmartBook study requests, Mavi adds local prompt guidance to read the assignment requirements, check units and calculations, preserve entered work, and pause for review before a graded submission. This is guidance only: it does not fine-tune the model or include course answers. Synthetic tests cover the policy routing; live Connect or SmartBook assignment completion has not been verified.
 
 ## Windows setup
 

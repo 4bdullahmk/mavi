@@ -14,6 +14,45 @@ import app_context
 
 
 class MacAutomationTests(unittest.TestCase):
+    def test_model_target_budget_prioritizes_requested_label_without_geometry(self):
+        targets = [{"id": str(i), "role": "AXLink", "label": "Toolbar item", "bounds": {"x": i}} for i in range(80)]
+        targets[-1]["label"] = "Chapter 4 accounting practice"
+        selected = mac._model_targets(targets, "Open Chapter 4 accounting practice")
+        self.assertEqual(len(selected), 32)
+        self.assertEqual(selected[0]["id"], "79")
+        self.assertTrue(all(set(item) == {"id", "role", "label"} for item in selected))
+
+    def test_accessibility_target_uses_observed_identity_and_rechecks_before_input(self):
+        actions = []
+        questions = []
+        target = {"id": "0.3.2", "role": "AXLink", "label": "Practice exercise", "bounds": {"x": 10, "y": 20, "width": 40, "height": 20}}
+        outputs = iter([json.dumps({"action": "target", "target_id": "0.3.2", "reason": "Open the practice exercise page", "risk": "low"}),
+                        json.dumps({"action": "done", "text": "Practice page visible."})])
+        def helper(payload, **_kwargs):
+            if payload["op"] == "windows": return {"windows": [{"window_id": 7, "title": "Course"}]}
+            if payload["op"] == "capture": return {"bundle_id": "com.brave.Browser", "window_id": 7, "image_base64": base64.b64encode(b"mock").decode(), "targets": [target]}
+            if payload["op"] == "action": actions.append(payload["action"])
+            return {}
+        def model(messages, **_kwargs):
+            self.assertIn('"id":"0.3.2"', messages[-1]["content"])
+            return next(outputs)
+        context = {"ask": lambda q: questions.append(q) or "yes", "call_model": model, "automation_policy": "routine_navigation"}
+        with patch.object(mac, "_call_helper", side_effect=helper):
+            mac.run("Open Brave and read the practice exercise", [], context, browser=True)
+        self.assertEqual(actions, [{"kind": "target", "target_id": "0.3.2", "expected_label": "Practice exercise", "expected_role": "AXLink", "expected_bounds": target["bounds"]}])
+        self.assertEqual(len(questions), 2)  # Task and screen access; ordinary link needs no repeated approval.
+
+    def test_invented_accessibility_target_sends_no_input(self):
+        def helper(payload, **_kwargs):
+            if payload["op"] == "windows": return {"windows": [{"window_id": 7, "title": "Course"}]}
+            if payload["op"] == "capture": return {"bundle_id": "com.brave.Browser", "window_id": 7, "image_base64": base64.b64encode(b"mock").decode(), "targets": []}
+            self.assertNotEqual(payload["op"], "action")
+            return {}
+        context = {"ask": lambda q: "yes", "call_model": lambda *args, **kwargs: json.dumps({"action": "target", "target_id": "0.9", "reason": "Open exercise", "risk": "low"})}
+        with patch.object(mac, "_call_helper", side_effect=helper):
+            with self.assertRaisesRegex(RuntimeError, "not in the current window"):
+                mac.run("Open Brave and read the practice exercise", [], context, browser=True)
+
     def test_explicit_app_routing_rejects_mentions_quotes_and_conflicts(self):
         self.assertEqual(mac.explicit_app_target("Open Discord"), "discord")
         self.assertEqual(mac.explicit_app_target("Please open disc."), "discord")
@@ -165,6 +204,27 @@ class MacAutomationTests(unittest.TestCase):
         self.assertIn("Opened the supplied HTTPS link", result)
         self.assertEqual([x["op"] for x in helper], ["default_browser", "open_url"])
         self.assertEqual(remembered[-1]["app"], "brave")
+
+    def test_explicit_browser_and_https_link_open_in_that_browser_before_task(self):
+        helper = []
+        prompts = []
+        context = {"ask": lambda question: prompts.append(question) or "yes",
+                   "call_model": lambda _messages, **_kw: json.dumps({"action": "done", "text": "The assignment page is open."})}
+        def fake_helper(payload, **_kwargs):
+            helper.append(payload)
+            if payload["op"] == "open_app": return {"bundle_id": payload["bundle_id"]}
+            if payload["op"] == "open_url": return {"bundle_id": payload["bundle_id"]}
+            if payload["op"] == "capability": return {"screen_recording": True, "accessibility": True}
+            if payload["op"] == "windows": return {"windows": [{"window_id": 51, "title": "Canvas Assignment"}]}
+            if payload["op"] == "capture": return {"bundle_id": "com.brave.Browser", "window_id": 51, "image_base64": base64.b64encode(b"screen").decode()}
+            return {}
+        with patch.object(mac, "_call_helper", side_effect=fake_helper):
+            result = mac.run("Open https://canvas.example.edu/courses/123456/assignments/987654?return=%2Fdashboard%2Fcourses%2F123456 in Brave and open the assignment", [], context, browser=True)
+        self.assertIn("assignment page is open", result)
+        open_url = next(item for item in helper if item["op"] == "open_url")
+        self.assertEqual(open_url["bundle_id"], "com.brave.Browser")
+        self.assertEqual(open_url["url"], "https://canvas.example.edu/courses/123456/assignments/987654?return=%2Fdashboard%2Fcourses%2F123456")
+        self.assertLess([item["op"] for item in helper].index("open_url"), [item["op"] for item in helper].index("windows"))
 
     def test_private_handoff_stop_takes_no_second_screenshot(self):
         captures = []

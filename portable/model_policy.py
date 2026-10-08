@@ -34,8 +34,14 @@ LEARNING_SITE_GUIDANCE = (
     "wait for explicit approval. Do not claim real-portal testing without evidence."
 )
 _LEARNING_SITE_PATTERN = re.compile(
-    r"\b(canvas|pearson|mcgraw\s*-?\s*hill|my(?:math|lab)|connect\s+courseware)\b|"
+    r"\b(canvas|pearson|mcgraw\s*-?\s*hill|my(?:math|lab)|smart\s*book|"
+    r"connect\s+(?:courseware|accounting|course|assignment|homework))\b|"
     r"\b(course site|learning management system|learning portal)\b",
+    re.I,
+)
+_COURSE_WORKFLOW_SITE = re.compile(r"\b(mcgra?w\s*-?\s*hill|smart\s*book|connect)\b", re.I)
+_COURSE_WORKFLOW_TASK = re.compile(
+    r"\b(accounting|course|assignment|homework|problem|question|practice|chapter|reading|graded|submit|due)\b",
     re.I,
 )
 _ROLE_PATTERNS = (
@@ -83,6 +89,9 @@ def prepare_messages(messages: Sequence[Mapping[str, Any]], role_hint: str | Non
     suffix = INITIATIVE_SUFFIX
     if _LEARNING_SITE_PATTERN.search(user_text):
         suffix += LEARNING_SITE_GUIDANCE
+        if _COURSE_WORKFLOW_SITE.search(user_text) and _COURSE_WORKFLOW_TASK.search(user_text):
+            from course_workflows import guidance_for
+            suffix += guidance_for(user_text)
     system_index = next((i for i, message in enumerate(result) if message.get("role") == "system"), None)
     if system_index is None:
         result.insert(0, {"role": "system", "content": suffix})

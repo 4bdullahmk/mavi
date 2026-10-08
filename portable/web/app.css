@@ -198,7 +198,8 @@ button:disabled { cursor: not-allowed; opacity: .46; }
 .automation-approval { margin: 0; padding: 8px 0 4px; border: 0; background: transparent; color: var(--muted); font-size: 10px; }
 .automation-approval legend { padding: 0 5px; color: var(--subtle); font-size: 9px; }
 .automation-approval label { display: inline-flex; align-items: center; gap: 5px; margin: 2px 14px 2px 0; color: var(--text); cursor: pointer; }
-.automation-approval input { accent-color: var(--accent); }
+.automation-approval .automation-policy-row { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 12px; margin: 0; color: var(--text); }
+.automation-policy-row select { min-width: 205px; max-width: 60%; height: 32px; padding: 0 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; }
 .automation-approval p { margin: 5px 0 0; line-height: 1.5; }
 .job-card { margin: 8px 0 24px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); }
 .job-top { display: flex; align-items: center; gap: 11px; }

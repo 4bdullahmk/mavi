@@ -5,7 +5,7 @@ if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
   print -u2 "Mavi currently requires Apple Silicon macOS."
   exit 1
 fi
-version="${MAVI_VERSION:-2.0.0}"
+version="${MAVI_VERSION:-2.0.1}"
 MAVI_VERSION="$version" ./build.sh
 app="${MAVI_BUILD_DIR:-${TMPDIR:-/tmp}/mavi-build}/Mavi.app"
 install_dir="$HOME/Applications"

@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 root="$(pwd)"
-version="${MAVI_VERSION:-2.0.0}"
+version="${MAVI_VERSION:-2.0.1}"
 build_root="${MAVI_BUILD_DIR:-${TMPDIR:-/tmp}/mavi-build}"
 app_path="$build_root/Mavi.app"
 cache_path="$build_root/swift-cache"
@@ -20,9 +20,11 @@ mkdir -p "$app_path/Contents/Resources/Source"
 cp *.swift *.py *.sh *.plist *.js "$app_path/Contents/Resources/Source/"
 cp "$app_path/Contents/Resources/AppIcon.icns" "$app_path/Contents/Resources/Source/"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" "$app_path/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${MAVI_BUILD_NUMBER:-1}" "$app_path/Contents/Info.plist"
-# Finder metadata copied from a source checkout is not part of the application.
-/usr/bin/xattr -cr "$app_path"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${MAVI_BUILD_NUMBER:-26}" "$app_path/Contents/Info.plist"
+# Strip only FinderInfo/resource-fork metadata that can prevent codesign.
+# Preserve quarantine and all other security attributes.
+/usr/bin/xattr -r -d com.apple.FinderInfo "$app_path" 2>/dev/null || true
+/usr/bin/xattr -r -d com.apple.ResourceFork "$app_path" 2>/dev/null || true
 /usr/bin/codesign --force --sign - --timestamp=none "$app_path"
 /usr/bin/codesign --verify --strict "$app_path"
 /usr/bin/python3 package_release.py "$app_path" "$root/dist" "$version"

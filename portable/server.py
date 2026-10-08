@@ -5,7 +5,7 @@ import argparse, base64, csv, hashlib, http.cookies, io, json, mimetypes, os, pl
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from model_policy import prepare_messages, strip_thinking, ThinkingFilter
-from app_context import clean_app_context, is_app_followup
+from app_context import clean_app_context, is_app_followup, is_permission_recovery, is_permission_recovery_phrase
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_DATA = Path(os.environ.get('LOCALAPPDATA', Path.home() / '.local/share')) / 'Mavi'
@@ -200,10 +200,17 @@ def choose_model():
 def call_model(messages, model=None, job=None):
     selected = model or choose_model()
     prepared, policy = prepare_messages(messages, (job or {}).get('_role'))
-    req = urllib.request.Request(OLLAMA + '/api/chat', data=json.dumps({
+    payload = {
         'model': selected, 'messages': prepared, 'stream': True, 'think': False,
         'options': {'num_ctx': 16384 if policy['role'] in ('files','code') else 8192, 'num_predict': policy['num_predict']},
-        'keep_alive': '1m'}).encode(), headers={'Content-Type': 'application/json'})
+        'keep_alive': '1m'}
+    output_format = (job or {}).get('_format')
+    if output_format == 'json' or isinstance(output_format, dict):
+        # Tool actions must be machine-readable. A prompt alone does not prevent
+        # local models from returning prose or Markdown around their action.
+        payload['format'] = output_format
+        payload['options']['temperature'] = 0
+    req = urllib.request.Request(OLLAMA + '/api/chat', data=json.dumps(payload).encode(), headers={'Content-Type': 'application/json'})
     chunks = []
     total = 0
     visible = ''
@@ -211,7 +218,19 @@ def call_model(messages, model=None, job=None):
     # Qwen templates may emit reasoning without an opening tag. Hold their
     # answer until final sanitization, while the UI displays operational status.
     buffered = 'qwen' in selected.lower()
-    with urllib.request.urlopen(req, timeout=180) as response:
+    try:
+        response_stream = urllib.request.urlopen(req, timeout=180)
+    except urllib.error.HTTPError as error:
+        try:
+            details = json.loads(error.read(4096)).get('error', '')
+        except (ValueError, OSError):
+            details = ''
+        detail = str(details).replace('\n', ' ')[:350]
+        # This is a local engine diagnostic, never the outgoing request body.
+        detail = re.sub(r'(?i)(?:sk-|ghp_|Bearer\s+)\S+', '[redacted]', detail)
+        detail = re.sub(r'(?:/Users/|/home/)[^\s]+', '[local path]', detail)
+        raise ValueError(f'The local model rejected the request (HTTP {error.code}). ' + (detail or 'Check that the selected model supports images and structured actions.')) from None
+    with response_stream as response:
         for line in response:
             if job and job['_cancel'].is_set(): raise InterruptedError('Stopped')
             if len(line) > MAX_BODY: raise ValueError('Model returned an oversized response')
@@ -263,6 +282,8 @@ def route_task(text, attachments, job):
     explicit_target = automation.route_explicit_target(text)
     if explicit_target:
         return explicit_target
+    if is_permission_recovery_phrase(text):
+        return 'computer' if is_permission_recovery(text, job.get('_app_context')) else 'chat'
     if is_app_followup(text, job.get('_app_context')): return 'computer'
     if automation.has_unresolved_app_reference(text): return 'chat'
     available=models()
@@ -366,6 +387,9 @@ def run_job(job, chat, text, attachments):
         def model_call(messages, model=None):
             role = {'files':'files','developer':'code','update':'code','cad':'code','stocks':'analysis','workers':'analysis','browser':'router','computer':'router'}.get(job['mode'])
             progress_job=job if job['mode']=='chat' else {'_cancel':job['_cancel'],'_stream':False,'_role':role}
+            if job['mode'] in ('browser', 'computer'):
+                progress_job['_format'] = getattr(automation_backend(), 'ACTION_SCHEMA', 'json')
+                if sys.platform != 'darwin': progress('Reading the selected window and choosing the next action…')
             return call_model(messages, model or job['_model'], progress_job)
         def agent_event(value):
             if not isinstance(value,dict): return

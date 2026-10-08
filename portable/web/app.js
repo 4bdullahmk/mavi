@@ -81,6 +81,14 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
   let theme = "system";
   let discordConfigDirty = false;
   let recording = null;
+  let sendPending = false;
+  const automationPolicyStorageKey = "mavi-automation-policy";
+  let automationPolicyChoice = (() => {
+    try {
+      const saved = localStorage.getItem(automationPolicyStorageKey);
+      return ["ask_each", "routine_navigation"].includes(saved) ? saved : "ask_each";
+    } catch { return "ask_each"; }
+  })();
   let agentEventJobId = null;
   let agentEventByID = new Map();
   let galleryItems = [];
@@ -215,13 +223,14 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     const surpriseReady = isLocalSurpriseRequest($("#composer-input")?.value || "");
     renderAutomationApprovalControls();
     renderChatContext();
-    $("#send-button").disabled = (!ready && !surpriseReady) || Boolean(recording);
+    $("#send-button").disabled = (!ready && !surpriseReady) || Boolean(recording) || sendPending;
     const recordButton = $("#record-button");
     const dictation = capabilityFor("dictation");
     recordButton.disabled = !recording && (!dictation.available || Boolean(activeJob));
     recordButton.title = recording ? "Stop recording" : (dictation.available ? "Record audio locally for dictation" : (dictation.reason || "Dictation is not ready on this device."));
     const note = $("#composer-note");
-    if (activeJob && !["chat", "browser", "computer"].includes(activeJob.mode)) note.textContent = "A task is already running. Stop it before starting another task.";
+    if (activeJob?.mode === "auto") note.textContent = "Mavi is choosing the right local workspace…";
+    else if (activeJob && !["chat", "browser", "computer"].includes(activeJob.mode)) note.textContent = "A task is already running. Stop it before starting another task.";
     else if (activeJob) note.textContent = "Send a follow-up to steer this task. Attachments can be used on your next task.";
     else note.textContent = "Local AI can make mistakes. Review important details.";
     const indicator = $("#model-indicator");
@@ -301,25 +310,33 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
       touch?.trigger && touch?.message && normalized === normalizedTouchText(touch.trigger)));
   }
 
+  function selectAutomationPolicy(value) {
+    if (!["ask_each", "routine_navigation"].includes(value)) return;
+    automationPolicyChoice = value;
+    try { localStorage.setItem(automationPolicyStorageKey, value); } catch { /* Keep the selection for this page session. */ }
+    const select = $("#automation-policy");
+    if (select) select.value = value;
+    renderAutomationApprovalControls();
+  }
+
   function renderAutomationApprovalControls() {
     const fieldset = $("#automation-approval");
+    const policySelect = $("#automation-policy");
     const scopeFieldset = $("#automation-scope");
     const details = $("#automation-control-details");
-    if (!fieldset || !scopeFieldset || !details) return;
+    if (!fieldset || !policySelect || !scopeFieldset || !details) return;
     const visible = !activeJob && ["auto", "browser", "computer"].includes(currentMode) && capabilityFor("computer").available;
     details.classList.toggle("hidden", !visible);
     fieldset.classList.toggle("hidden", !visible);
     scopeFieldset.classList.toggle("hidden", !visible);
+    policySelect.value = automationPolicyChoice;
     if (!visible) {
       details.open = false;
-      const askEach = fieldset.querySelector('input[name="automation-policy"][value="ask_each"]');
-      if (askEach) askEach.checked = true;
       const singleApp = scopeFieldset.querySelector('input[name="automation-scope"][value="single_app"]');
       if (singleApp) singleApp.checked = true;
     }
-    const policy = fieldset.querySelector('input[name="automation-policy"]:checked')?.value;
     const scope = scopeFieldset.querySelector('input[name="automation-scope"]:checked')?.value;
-    $("#automation-control-summary-state").textContent = `${policy === "routine_navigation" ? "Routine navigation" : "Ask each action"} · ${scope === "whole_computer" ? "approved app switches" : "selected app"}`;
+    $("#automation-control-summary-state").textContent = `${automationPolicyChoice === "routine_navigation" ? "Routine navigation" : "Ask each action"} · ${scope === "whole_computer" ? "approved app switches" : "selected app"}`;
   }
 
   function formatSize(value) {
@@ -1018,14 +1035,18 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     const prompt = typeof question === "string" ? question :
       (typeof question?.text === "string" ? question.text : (typeof question?.prompt === "string" ? question.prompt : ""));
     const requiresApproval = Boolean(job?.requires_approval);
-    if (!prompt && !requiresApproval) {
+    const appAccessApproval = /^Allow Mavi to (?:read and control|read the window|open or bring|capture)\b/i.test(prompt) ||
+      /^Mavi will read and operate\b[\s\S]*\bAllow this task\?$/i.test(prompt);
+    const explicitActionApproval = /^(?:Mavi wants to|Mavi is about to|Scroll\b|Press\b)[\s\S]*\bAllow this (?:action|click|text|step)\?/i.test(prompt);
+    const showApprovalButtons = requiresApproval || appAccessApproval || explicitActionApproval;
+    if (!prompt && !showApprovalButtons) {
       container.classList.add("hidden");
       container.replaceChildren();
       delete container.dataset.questionKey;
       return;
     }
     const jobID = typeof job?.id === "string" ? job.id : (typeof activeJob?.id === "string" ? activeJob.id : "");
-    const questionKey = JSON.stringify([jobID, prompt, requiresApproval]);
+    const questionKey = JSON.stringify([jobID, prompt, showApprovalButtons]);
     container.classList.remove("hidden");
     if (container.dataset.questionKey === questionKey) return;
     container.dataset.questionKey = questionKey;
@@ -1035,13 +1056,13 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     container.append(p);
     const actions = document.createElement("div");
     actions.className = "job-question-actions";
-    if (requiresApproval) {
+    if (showApprovalButtons) {
       const deny = document.createElement("button");
-      deny.className = "quiet-button"; deny.type = "button"; deny.textContent = "Decline";
-      deny.addEventListener("click", () => answerJob("decline"));
+      deny.className = "quiet-button"; deny.type = "button"; deny.textContent = "Cancel task";
+      deny.addEventListener("click", () => answerJob("no"));
       const approve = document.createElement("button");
-      approve.className = "primary-button"; approve.type = "button"; approve.textContent = "Approve this step";
-      approve.addEventListener("click", () => answerJob("approve"));
+      approve.className = "primary-button"; approve.type = "button"; approve.textContent = "Allow";
+      approve.addEventListener("click", () => answerJob("yes"));
       actions.append(deny, approve);
     } else {
       const input = document.createElement("input");
@@ -1187,6 +1208,7 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     const text = typeof messageOverride === "string" ? messageOverride.trim() : input.value.trim();
     if (!text && !attachments.length) return;
     if (recording) { showToast("Stop the microphone recording before sending."); return; }
+    if (sendPending) return;
     // The author explicitly chose to ship this Easter egg in every public package.
     // It is UI-only: no model call, saved chat, or private setup file is needed.
     const personalTouch = state?.settings?.personal_touch;
@@ -1202,37 +1224,38 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     }
     const capability = capabilityFor(currentMode);
     if (!capability.available) { showToast(capability.reason || "This workspace is not ready."); return; }
+    sendPending = true;
+    renderModelStatus();
     if (activeJob) {
-      if (activeJob.mode && !["chat", "browser", "computer"].includes(activeJob.mode)) { showToast("A task is already running. Stop it before starting another task."); return; }
-      if (!text) { showToast("Add a short instruction to steer the active task."); return; }
-      if (attachments.length) { showToast("Active task steering accepts text only. Keep the attachments for your next task."); return; }
-      try { await steerJob(text); input.value = ""; resizeComposer(); }
-      catch (error) { showToast(error.message || "Could not steer the active task."); }
+      try {
+        if (activeJob.mode === "auto") { showToast("Mavi is choosing the right local workspace. Wait a moment before sending a follow-up."); return; }
+        if (activeJob.mode && !["chat", "browser", "computer"].includes(activeJob.mode)) { showToast("A task is already running. Stop it before starting another task."); return; }
+        if (!text) { showToast("Add a short instruction to steer the active task."); return; }
+        if (attachments.length) { showToast("Active task steering accepts text only. Keep the attachments for your next task."); return; }
+        await steerJob(text); input.value = ""; resizeComposer();
+      } catch (error) { showToast(error.message || "Could not steer the active task."); }
+      finally { sendPending = false; renderModelStatus(); }
       return;
     }
     const requestText = text || (currentMode === "dictation" ? "Please transcribe the attached audio recording." : "Please review the attached files.");
-    const sentFiles = attachments.map(({ name, text: content, data_base64, mime }) => ({ name, ...(typeof content === "string" ? { text: content } : {}), ...(data_base64 ? { data_base64, mime } : {}) }));
     const wasNew = !activeChatId;
-    appendMessage("user", requestText, attachments);
-    if (wasNew) {
-      const optimistic = { id: `pending-${Date.now()}`, title: (requestText || attachments[0]?.name || "New conversation").slice(0, 70), messages: [] };
-      activeChatId = optimistic.id;
-      state = state || {};
-      state.chats = [optimistic, ...(state.chats || [])];
-    }
-    const draftChatID = activeChatId;
-    input.value = ""; resizeComposer(); clearAttachments(); renderChats();
+    let draftChatID = null;
     try {
-      const approvalControl = $("#automation-approval");
-      const approvalChoice = approvalControl && !approvalControl.classList.contains("hidden")
-        ? (approvalControl.querySelector('input[name="automation-policy"]:checked')?.value || "ask_each")
-        : null;
+      const sentFiles = attachments.map(({ name, text: content, data_base64, mime }) => ({ name, ...(typeof content === "string" ? { text: content } : {}), ...(data_base64 ? { data_base64, mime } : {}) }));
+      appendMessage("user", requestText, attachments);
+      if (wasNew) {
+        const optimistic = { id: `pending-${Date.now()}`, title: (requestText || attachments[0]?.name || "New conversation").slice(0, 70), messages: [] };
+        activeChatId = optimistic.id;
+        state = state || {};
+        state.chats = [optimistic, ...(state.chats || [])];
+      }
+      draftChatID = activeChatId;
+      input.value = ""; resizeComposer(); clearAttachments(); renderChats();
       const scopeControl = $("#automation-scope");
       const scopeChoice = scopeControl && !scopeControl.classList.contains("hidden")
         ? (scopeControl.querySelector('input[name="automation-scope"]:checked')?.value || "single_app")
         : null;
-      const payload = { chat_id: wasNew ? null : draftChatID, text: requestText, attachments: sentFiles, mode: apiModeFor(currentMode) };
-      if (approvalChoice) payload.automation_policy = approvalChoice;
+      const payload = { chat_id: wasNew ? null : draftChatID, text: requestText, attachments: sentFiles, mode: apiModeFor(currentMode), automation_policy: automationPolicyChoice };
       if (scopeChoice) payload.automation_scope = scopeChoice;
       const result = await post("/chat", payload);
       if (result.chat_id) {
@@ -1242,10 +1265,6 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
         if (optimistic) optimistic.id = result.chat_id;
       }
       if (!result.job_id) throw new Error("The local backend accepted no job ID; nothing can be tracked yet.");
-      if (approvalControl) {
-        const askEach = approvalControl.querySelector('input[name="automation-policy"][value="ask_each"]');
-        if (askEach) askEach.checked = true;
-      }
       if (scopeControl) {
         const singleApp = scopeControl.querySelector('input[name="automation-scope"][value="single_app"]');
         if (singleApp) singleApp.checked = true;
@@ -1256,13 +1275,13 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
       renderJob({ status: "working", mode: activeJob.mode });
       pollJob();
     } catch (error) {
-      if (wasNew) {
+      if (wasNew && draftChatID) {
         state.chats = (state.chats || []).filter((chat) => chat.id !== draftChatID);
         activeChatId = null;
       }
       renderChats(); showWelcomeIfEmpty();
       showToast(error.message || "Could not send the request to the local backend.");
-    }
+    } finally { sendPending = false; renderModelStatus(); }
   }
 
   async function handleAttachmentFiles(files) {
@@ -1676,6 +1695,7 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     $$("[data-theme-choice]").forEach((button) => button.addEventListener("click", () => saveThemeChoice(button.dataset.themeChoice)));
     $("#model-select").addEventListener("change", saveSelectedModel);
     $("#composer-form").addEventListener("submit", (event) => { event.preventDefault(); sendMessage(); });
+    $("#automation-policy").addEventListener("change", (event) => selectAutomationPolicy(event.target.value));
     $("#automation-control-details").addEventListener("change", renderAutomationApprovalControls);
     $("#continue-app-context").addEventListener("click", continueAppContext);
     $("#clear-app-context").addEventListener("click", clearAppContext);

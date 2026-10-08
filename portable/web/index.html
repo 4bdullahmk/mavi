@@ -110,10 +110,9 @@
             <summary><span>Computer control</span><span class="automation-control-summary-state" id="automation-control-summary-state">Ask each action · selected app</span></summary>
             <div class="automation-control-body">
               <fieldset class="automation-approval hidden" id="automation-approval" aria-describedby="automation-approval-note">
-                <legend>Approvals · this task</legend>
-                <label><input type="radio" name="automation-policy" value="ask_each" checked> Ask before each action</label>
-                <label><input type="radio" name="automation-policy" value="routine_navigation"> Allow routine navigation</label>
-                <p id="automation-approval-note">Routine mode may scroll or open an ordinary navigation link, tab, or menu without repeating the prompt. Mavi still asks before typing, submitting, messaging, signing in, saving, or changing data or security. Every task still asks before reading or operating the selected window; this choice applies to this task only.</p>
+                <legend>Action approvals</legend>
+                <label class="automation-policy-row" for="automation-policy"><span>Choose how often Mavi asks</span><select id="automation-policy" name="automation-policy"><option value="ask_each">Ask before every action</option><option value="routine_navigation">Handle routine navigation</option></select></label>
+                <p id="automation-approval-note">Routine navigation covers low-risk scrolling and ordinary links, tabs, or menus. Mavi still asks before typing, sending, saving, or changing data or security. This preference is saved on this device.</p>
               </fieldset>
               <fieldset class="automation-approval hidden" id="automation-scope" aria-describedby="automation-scope-note">
                 <legend>Window scope · this task</legend>

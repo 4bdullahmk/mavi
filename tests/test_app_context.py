@@ -131,7 +131,40 @@ class AppContextTests(unittest.TestCase):
                 self.assertEqual(server.route_task("Open Finder and find the report", [], job), "computer")
                 self.assertEqual(server.route_task("Open Discord", [], job), "computer")
                 self.assertEqual(server.route_task("Continue the previous task", [], job), "computer")
+                stopped = {"_model": "qwen3:8b", "_cancel": threading.Event(),
+                           "_app_context": app_context.clean_app_context({
+                               "app": "brave", "task": "Open a Canvas assignment", "status": "stopped",
+                               "last_result": "App access was not approved."})}
+                self.assertEqual(server.route_task("K approve all", [], stopped), "computer")
+                self.assertEqual(server.route_task("I give you permission", [], stopped), "computer")
+                completed = {**stopped, "_app_context": {**stopped["_app_context"], "status": "done"}}
+                self.assertEqual(server.route_task("K approve all", [], completed), "chat")
         self.assertIsNone(app_context.clean_app_context({"app": "unsupported-app", "task": "anything"}))
+
+    def test_approval_recovery_is_routing_only_for_stopped_permission_failure(self):
+        bookmark = app_context.clean_app_context({"app": "brave", "task": "Click the file link", "status": "stopped",
+                                                   "last_result": "App access was not approved."})
+        self.assertTrue(app_context.is_permission_recovery("K approve all", bookmark))
+        self.assertTrue(app_context.is_permission_recovery("I give you permission", bookmark))
+        self.assertTrue(app_context.is_permission_recovery("Okay, you can continue", bookmark))
+        self.assertFalse(app_context.is_permission_recovery("yes", bookmark))
+        self.assertFalse(app_context.is_permission_recovery("What permissions does Mavi need?", bookmark))
+        self.assertFalse(app_context.is_permission_recovery("I give you permission", {**bookmark, "status": "done"}))
+        self.assertFalse(app_context.is_permission_recovery("I give you permission", {**bookmark, "last_result": "Stopped by user"}))
+
+    def test_recovery_phrase_does_not_grant_consent_to_app_automation(self):
+        with patch.object(server.sys, "platform", "darwin"):
+            adapter = server.automation_backend()
+        remembered = app_context.clean_app_context({"app": "brave", "task": "Click on one of the files",
+                                                    "status": "stopped", "last_result": "App access was not approved."})
+        prompts = []
+        with patch.object(adapter, "_call_helper") as helper:
+            with self.assertRaisesRegex(RuntimeError, "not approved"):
+                adapter.run("K approve all", [], {"app_context": remembered,
+                    "ask": lambda prompt: prompts.append(prompt) or "decline"})
+        self.assertIn("Allow Mavi to read and control", prompts[0])
+        self.assertIn("ask before each action", prompts[0])
+        helper.assert_not_called()
 
 
     def _automation_job(self, request):

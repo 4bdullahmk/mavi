@@ -42,8 +42,19 @@ private enum MacAutomation {
                   let components = URLComponents(string: raw), components.scheme?.lowercased() == "https",
                   let host = components.host, !host.isEmpty, components.user == nil, components.password == nil,
                   let url = components.url else { throw SafeError("Only a direct HTTPS link from your request can be opened.") }
-            guard NSWorkspace.shared.open(url) else { throw SafeError("macOS could not open the supplied HTTPS link.") }
-            let bundle = NSWorkspace.shared.urlForApplication(toOpen: url).flatMap { Bundle(url: $0)?.bundleIdentifier }
+            let bundle: String?
+            if let requestedBundle = input["bundle_id"] as? String {
+                let supported = try bundleID(["bundle_id": requestedBundle])
+                guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: supported) else {
+                    throw SafeError("\(apps[supported] ?? "The selected app") is not installed.")
+                }
+                let configuration = NSWorkspace.OpenConfiguration(); configuration.activates = true
+                _ = try await NSWorkspace.shared.open([url], withApplicationAt: appURL, configuration: configuration)
+                bundle = supported
+            } else {
+                guard NSWorkspace.shared.open(url) else { throw SafeError("macOS could not open the supplied HTTPS link.") }
+                bundle = NSWorkspace.shared.urlForApplication(toOpen: url).flatMap { Bundle(url: $0)?.bundleIdentifier }
+            }
             return ["url": url.absoluteString, "bundle_id": bundle ?? ""]
         case "windows":
             let bundle = try bundleID(input)
@@ -82,14 +93,15 @@ private enum MacAutomation {
             guard let data = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.82]), data.count <= 8_000_000 else {
                 throw SafeError("The selected app window screenshot is too large to send to the local model.")
             }
+            let targets = accessibilityTargets(window: window, bundle: bundle)
             return ["bundle_id": bundle, "window_id": Int(window.windowID), "title": String((window.title ?? "Window").prefix(240)),
-                    "width": cg.width, "height": cg.height, "image_base64": data.base64EncodedString()]
+                    "width": cg.width, "height": cg.height, "image_base64": data.base64EncodedString(), "targets": targets]
         case "action":
             let (bundle, window) = try await resolveWindow(input)
             guard AXIsProcessTrusted() else { throw SafeError("Allow Accessibility for Mavi in System Settings before using computer control.") }
             guard isFocused(window, bundle: bundle) else { throw SafeError("The selected app window lost focus. No input was sent; focus it and retry.") }
             guard let action = input["action"] as? [String: Any], let kind = action["kind"] as? String else { throw SafeError("Invalid reviewed action.") }
-            try perform(kind: kind, action: action, window: window)
+            try perform(kind: kind, action: action, window: window, bundle: bundle)
             return ["performed": kind, "window_id": Int(window.windowID)]
         default: throw SafeError("Unsupported helper operation.")
         }
@@ -133,9 +145,149 @@ private enum MacAutomation {
         return sameFrame(frame, window.frame)
     }
 
-    private static func perform(kind: String, action: [String: Any], window: SCWindow) throws {
+    private static let actionableRoles: Set<String> = ["AXLink", "AXButton", "AXMenuItem"]
+
+    private static func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success else { return nil }
+        return value
+    }
+
+    private static func stringAttribute(_ element: AXUIElement, _ name: String) -> String? {
+        guard let value = attribute(element, name) else { return nil }
+        return value as? String
+    }
+
+    private static func role(_ element: AXUIElement) -> String? {
+        stringAttribute(element, kAXRoleAttribute as String)
+    }
+
+    private static func childElements(_ element: AXUIElement) -> [AXUIElement] {
+        (attribute(element, kAXChildrenAttribute as String) as? [AXUIElement]) ?? []
+    }
+
+    private static func selectedAXWindow(window: SCWindow, bundle: String) -> AXUIElement? {
+        guard let owner = window.owningApplication, owner.bundleIdentifier == bundle else { return nil }
+        let app = AXUIElementCreateApplication(owner.processID)
+        guard let windows = attribute(app, kAXWindowsAttribute as String) as? [AXUIElement] else { return nil }
+        let matches = windows.filter { element in axBounds(element).map { sameFrame($0, window.frame) } ?? false }
+        return matches.count == 1 ? matches[0] : nil
+    }
+
+    private static func elementLabel(_ element: AXUIElement) -> String? {
+        for key in [kAXTitleAttribute as String, kAXDescriptionAttribute as String, kAXHelpAttribute as String] {
+            if let value = stringAttribute(element, key), !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return String(value.trimmingCharacters(in: .whitespacesAndNewlines).prefix(180))
+            }
+        }
+        // AXValue is read only from static text nodes. Editable and secure fields are never queried.
+        for child in childElements(element).prefix(80) where role(child) == (kAXStaticTextRole as String) {
+            if let value = stringAttribute(child, kAXValueAttribute as String), !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return String(value.trimmingCharacters(in: .whitespacesAndNewlines).prefix(180))
+            }
+        }
+        return nil
+    }
+
+    private static func isVisible(_ rect: CGRect, in window: SCWindow) -> Bool {
+        guard rect.width > 0, rect.height > 0, rect.minX.isFinite, rect.minY.isFinite,
+              rect.width.isFinite, rect.height.isFinite else { return false }
+        let intersection = rect.intersection(window.frame)
+        guard !intersection.isNull, intersection.width >= 2, intersection.height >= 2 else { return false }
+        return NSScreen.screens.contains { screen in
+            // AX and ScreenCaptureKit use global top-left display coordinates;
+            // NSScreen.frame uses bottom-left coordinates and can reject every
+            // target on a secondary display above or below the main display.
+            guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return false }
+            let visibleIntersection = intersection.intersection(CGDisplayBounds(CGDirectDisplayID(number.uint32Value)))
+            return !visibleIntersection.isNull && visibleIntersection.width >= 2 && visibleIntersection.height >= 2
+        }
+    }
+
+    private static func normalizedBounds(_ rect: CGRect, window: CGRect) -> [String: Int] {
+        func norm(_ value: CGFloat, _ origin: CGFloat, _ extent: CGFloat) -> Int {
+            Int(max(0, min(1000, ((value - origin) / max(extent, 1)) * 1000)).rounded())
+        }
+        let clipped = rect.intersection(window)
+        return ["x": norm(clipped.minX, window.minX, window.width), "y": norm(clipped.minY, window.minY, window.height),
+                "width": Int(max(0, min(1000, clipped.width / max(window.width, 1) * 1000)).rounded()),
+                "height": Int(max(0, min(1000, clipped.height / max(window.height, 1) * 1000)).rounded())]
+    }
+
+    private static func accessibilityTargets(window: SCWindow, bundle: String) -> [[String: Any]] {
+        guard let root = selectedAXWindow(window: window, bundle: bundle) else { return [] }
+        var results: [[String: Any]] = []
+        var visited = 0
+        var stack: [(AXUIElement, [Int], Int)] = [(root, [], 0)]
+        while let (element, path, depth) = stack.popLast(), visited < 2500, results.count < 100 {
+            visited += 1
+            if let currentRole = role(element), actionableRoles.contains(currentRole),
+               let rect = axBounds(element), isVisible(rect, in: window), let label = elementLabel(element), !label.isEmpty {
+                results.append(["id": path.map(String.init).joined(separator: "."), "role": currentRole,
+                                "label": label, "bounds": normalizedBounds(rect, window: window.frame)])
+            }
+            guard depth < 24 else { continue }
+            let children = childElements(element)
+            for index in children.indices.reversed() where stack.count + visited < 2500 {
+                stack.append((children[index], path + [index], depth + 1))
+            }
+        }
+        return results
+    }
+
+    private static func resolveTarget(_ action: [String: Any], window: SCWindow, bundle: String) throws -> (AXUIElement, CGRect) {
+        guard let targetID = action["target_id"] as? String, targetID.count <= 160,
+              let expectedRole = action["expected_role"] as? String, actionableRoles.contains(expectedRole),
+              let expectedLabel = action["expected_label"] as? String, !expectedLabel.isEmpty, expectedLabel.count <= 180 else {
+            throw SafeError("Invalid accessibility target. Refresh the window and select a listed target.")
+        }
+        guard let root = selectedAXWindow(window: window, bundle: bundle) else {
+            throw SafeError("The selected window no longer has a unique accessibility tree. Refresh the window list.")
+        }
+        let components = targetID.split(separator: ".", omittingEmptySubsequences: false)
+        guard !components.isEmpty, components.count <= 24,
+              components.allSatisfy({ Int($0).map { $0 >= 0 && $0 < 2500 } ?? false }) else {
+            throw SafeError("The accessibility target path is invalid. Refresh the window and select a listed target.")
+        }
+        var element = root
+        for component in components {
+            let index = Int(component)!
+            let children = childElements(element)
+            guard index < children.count else { throw SafeError("The accessibility target changed. Refresh the window and select it again.") }
+            element = children[index]
+        }
+        guard role(element) == expectedRole, elementLabel(element) == expectedLabel,
+              let rect = axBounds(element), isVisible(rect, in: window) else {
+            throw SafeError("The accessibility target label, role, or position changed. Refresh the window and select it again.")
+        }
+        if let expectedBounds = action["expected_bounds"] as? [String: Any] {
+            let actual = normalizedBounds(rect, window: window.frame)
+            for key in ["x", "y", "width", "height"] {
+                if let expected = expectedBounds[key] as? Int, abs((actual[key] ?? 0) - expected) > 20 {
+                    throw SafeError("The accessibility target moved. Refresh the window and select it again.")
+                }
+            }
+        }
+        return (element, rect)
+    }
+
+    private static func perform(kind: String, action: [String: Any], window: SCWindow, bundle: String) throws {
         let bounds = window.frame
         switch kind {
+        case "target":
+            let (element, rect) = try resolveTarget(action, window: window, bundle: bundle)
+            var names: CFArray?
+            if AXUIElementCopyActionNames(element, &names) == .success,
+               let actions = names as? [String], actions.contains(kAXPressAction as String) {
+                guard AXUIElementPerformAction(element, kAXPressAction as CFString) == .success else {
+                    throw SafeError("macOS could not activate the selected accessibility target.")
+                }
+                return
+            }
+            // The exact element was re-resolved and validated above; click only its current visible center.
+            let visible = rect.intersection(window.frame)
+            let center = CGPoint(x: visible.midX, y: visible.midY)
+            postMouse(.mouseMoved, center); postMouse(.leftMouseDown, center); postMouse(.leftMouseUp, center)
         case "click":
             guard let x = action["x"] as? Int, let y = action["y"] as? Int, (0...1000).contains(x), (0...1000).contains(y) else { throw SafeError("Invalid click coordinates.") }
             let point = CGPoint(x: bounds.minX + bounds.width * CGFloat(x) / 1000, y: bounds.minY + bounds.height * CGFloat(y) / 1000)
