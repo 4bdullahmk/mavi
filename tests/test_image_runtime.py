@@ -194,6 +194,27 @@ class ImageRuntimeTests(unittest.TestCase):
         self.assertFalse(reporter.consume_line(json.dumps({"type": "other", "phase": "denoise", "step": 1, "total_steps": 28})))
         self.assertEqual(messages, [])
 
+    def test_macos_available_memory_uses_only_free_and_inactive_pages(self):
+        sample = ("Mach Virtual Memory Statistics: (page size of 16384 bytes)\n"
+                  "Pages free: 10.\nPages inactive: 5.\nPages speculative: 100.\nPages active: 900.\n")
+        with mock.patch.object(image_runtime.sys, "platform", "darwin"), \
+             mock.patch.object(image_runtime.subprocess, "run", return_value=types.SimpleNamespace(stdout=sample)) as run:
+            self.assertEqual(image_runtime._available_ram_bytes(), 15 * 16384)
+        run.assert_called_once_with(["/usr/bin/vm_stat"], capture_output=True, text=True, timeout=3, check=True)
+
+    def test_macos_memory_probe_fails_closed_when_vm_stat_is_unavailable(self):
+        with mock.patch.object(image_runtime.sys, "platform", "darwin"), \
+             mock.patch.object(image_runtime.subprocess, "run", side_effect=FileNotFoundError):
+            with self.assertRaisesRegex(ValueError, "could not be measured"):
+                image_runtime._available_ram_bytes()
+
+    def test_macos_memory_parser_rejects_missing_or_invalid_values(self):
+        with self.assertRaisesRegex(ValueError, "did not report"):
+            image_runtime._parse_macos_available_bytes("page size of 16384 bytes\nPages free: 4.\n")
+        with self.assertRaisesRegex(ValueError, "invalid memory values"):
+            image_runtime._parse_macos_available_bytes(
+                "page size of 16384 bytes\nPages free: 4.\nPages inactive: -2.\n")
+
     def test_macos_run_routes_to_local_mlx_backend(self):
         with mock.patch.object(image_runtime.sys, "platform", "darwin"), \
              mock.patch.object(image_runtime, "_run_mlx", return_value="Saved locally") as run_mlx:

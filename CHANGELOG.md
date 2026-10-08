@@ -16,6 +16,7 @@
 - Build 28 keeps class assignment help grounded in materials the user supplies or the course assigns. Missing material is requested rather than replaced with web searches or general knowledge; source facts are distinguished from calculations and visible citations are not invented.
 - Build 28 allows a user-requested full SmartBook practice activity to continue until it finishes or the user presses Stop. Mac controls use bounded targets for visible links, buttons, checkboxes and radio buttons. One monitored SmartBook practice item was answered correctly using a class-source excerpt supplied by the user; this does not verify autonomous source discovery or full-workbook completion.
 - Build 28 detects an existing Apple Silicon MLX-Gen runtime with complete official Qwen Image generation/edit checkpoints. It runs locally in offline mode, checks available unified memory before loading, and does not download image models automatically. Progress displays backend-reported step counts and an ETA only after enough observed steps; it does not invent percentages. Real image generation and quality remain unverified for this build.
+- Build 29 fixes macOS available-memory detection by using `vm_stat` free and inactive pages. Image preflight now reports a measured memory shortfall instead of failing because macOS does not provide `SC_AVPHYS_PAGES`.
 
 ## 2.0.0 — desktop web workspace and task continuation
 

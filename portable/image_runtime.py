@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 import uuid
+import re
 from pathlib import Path
 
 MODELS = {"generate": "Qwen/Qwen-Image-2512", "edit": "Qwen/Qwen-Image-Edit-2511",
@@ -212,6 +213,13 @@ def _checkpoint(root: Path, mode: str, has_images: bool) -> tuple[str, Path]:
 
 def _available_ram_bytes() -> int:
     """Return currently available physical memory without requiring an extra package."""
+    if sys.platform == "darwin":
+        try:
+            result = subprocess.run(["/usr/bin/vm_stat"], capture_output=True, text=True,
+                                    timeout=3, check=True)
+            return _parse_macos_available_bytes(result.stdout)
+        except (OSError, subprocess.SubprocessError, ValueError):
+            raise ValueError("Available system memory could not be measured; image loading was stopped.") from None
     if os.name == "nt":
         class MEMORYSTATUSEX(ctypes.Structure):
             _fields_ = [
@@ -234,6 +242,26 @@ def _available_ram_bytes() -> int:
         return int(os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE"))
     except (AttributeError, OSError, ValueError):
         raise ValueError("Available system memory could not be measured; image loading was stopped.") from None
+
+
+def _parse_macos_available_bytes(output: str) -> int:
+    """Use only vm_stat's free and inactive page counts; never treat total RAM as free."""
+    if not isinstance(output, str):
+        raise ValueError("Invalid vm_stat output.")
+    page_match = re.search(r"page size of\s+([+-]?[0-9,]+)\s+bytes", output, re.IGNORECASE)
+    free_match = re.search(r"^Pages free:\s*([+-]?[0-9,]+)", output, re.MULTILINE | re.IGNORECASE)
+    inactive_match = re.search(r"^Pages inactive:\s*([+-]?[0-9,]+)", output, re.MULTILINE | re.IGNORECASE)
+    if not (page_match and free_match and inactive_match):
+        raise ValueError("vm_stat did not report page size, free pages, and inactive pages.")
+    page_size = int(page_match.group(1).replace(",", ""))
+    free_pages = int(free_match.group(1).replace(",", ""))
+    inactive_pages = int(inactive_match.group(1).replace(",", ""))
+    if page_size <= 0 or free_pages < 0 or inactive_pages < 0:
+        raise ValueError("vm_stat reported invalid memory values.")
+    available = (free_pages + inactive_pages) * page_size
+    if available <= 0:
+        raise ValueError("vm_stat reported no available pages.")
+    return available
 
 
 def _weight_bytes(model_path: Path) -> int:
