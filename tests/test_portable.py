@@ -127,6 +127,45 @@ class WorkspaceTests(unittest.TestCase):
         finally:
             server.STATE=old_state;server.DISCORD_TOKEN=old_token;server.DISCORD_STOP=old_stop;server.DISCORD_THREAD=old_thread
             server.DISCORD.clear();server.DISCORD.update(old_discord)
+    def test_discord_save_off_keeps_token_memory_only_until_disconnect(self):
+        old_state, old_discord = server.STATE, dict(server.DISCORD)
+        old_token, old_stop, old_thread = server.DISCORD_TOKEN, server.DISCORD_STOP, server.DISCORD_THREAD
+        server.STATE = {'chats': [], 'profile': '', 'settings': {'model': '', 'theme': 'system', 'onboarded': False,
+                       'project_path': '', 'release_url': '', 'discord': {}}}
+        server.DISCORD_TOKEN = ''
+        server.DISCORD_STOP = threading.Event()
+        server.DISCORD_THREAD = None
+        server.DISCORD.clear(); server.restore_discord_settings()
+        token = 'save-off-session-only-token-fixture'
+        ids = {'application_id': '12345678901234567', 'channel_id': '23456789012345678',
+               'user_ids': ['34567890123456789']}
+        try:
+            with patch.object(server, 'verify_discord_application') as verify, patch.object(server, 'launch_discord_worker') as launch:
+                server.discord_configure({**ids, 'token': token, 'enabled': False, 'allow_tasks': False})
+                self.assertEqual(server.DISCORD_TOKEN, token)
+                self.assertNotIn(token, json.dumps(server.DISCORD))
+                persisted = (server.DATA / 'workspace.json').read_text(encoding='utf-8')
+                self.assertNotIn(token, persisted)
+                self.assertEqual(set(json.loads(persisted)['settings']['discord']), set(ids))
+
+                # A later explicit enable can use that token without placing it
+                # in the web-visible state or on-disk workspace.
+                server.discord_configure({**ids, 'enabled': True, 'allow_tasks': False})
+                verify.assert_called_once_with(token, ids['application_id'])
+                launch.assert_called_once()
+                self.assertEqual(launch.call_args.args[0], token)
+                self.assertNotIn(token, json.dumps(server.DISCORD))
+
+                # Saving a disconnect without entering another token clears the
+                # process-only credential as well.
+                server.discord_configure({**ids, 'enabled': False, 'allow_tasks': False})
+                self.assertEqual(server.DISCORD_TOKEN, '')
+                self.assertNotIn(token, (server.DATA / 'workspace.json').read_text(encoding='utf-8'))
+        finally:
+            server.STATE = old_state; server.DISCORD_TOKEN = old_token
+            server.DISCORD_STOP = old_stop; server.DISCORD_THREAD = old_thread
+            server.DISCORD.clear(); server.DISCORD.update(old_discord)
+
     def test_explicit_file_routes_without_model(self):
         job={'_model':'qwen3:8b','_cancel':threading.Event()}
         self.assertEqual(server.route_task('Create a text file named mavi-check.txt',[],job),'files')

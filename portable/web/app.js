@@ -80,6 +80,14 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
   let localProfileDraft = "";
   let theme = "system";
   let discordConfigDirty = false;
+  let onlineConfigDirty = false;
+  let onlineModeDraft = "local";
+  let onlineRoutesDraft = [];
+  let onlineGatewayDraft = "";
+  let onlineProviders = [];
+  let onlineRouteStatuses = [];
+  let onlineKeyConfigured = new Set();
+  let onlineCatalogs = new Map();
   let recording = null;
   let sendPending = false;
   const automationPolicyStorageKey = "mavi-automation-policy";
@@ -234,10 +242,13 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     recordButton.disabled = !recording && (!dictation.available || Boolean(activeJob));
     recordButton.title = recording ? "Stop recording" : (dictation.available ? "Record audio locally for dictation" : (dictation.reason || "Dictation is not ready on this device."));
     const note = $("#composer-note");
-    if (activeJob?.mode === "auto") note.textContent = "Mavi is choosing the right local workspace…";
-    else if (activeJob && !["chat", "browser", "computer"].includes(activeJob.mode)) note.textContent = "A task is already running. Stop it before starting another task.";
-    else if (activeJob) note.textContent = "Send a follow-up to steer this task. Attachments can be used on your next task.";
-    else note.textContent = "Local AI can make mistakes. Review important details.";
+    const hybridNotice = onlineModeDraft === "hybrid"
+      ? (hasOnlineRoutes() ? "Hybrid is enabled; eligible text tasks try configured online routes and may send task text/context to those providers. Screenshots and computer-control content stay local. " : "Hybrid mode has no configured online routes; eligible tasks use local inference. ")
+      : "";
+    if (activeJob?.mode === "auto") note.textContent = `${hybridNotice}Mavi is choosing the right workspace…`;
+    else if (activeJob && !["chat", "browser", "computer"].includes(activeJob.mode)) note.textContent = `${hybridNotice}A task is already running. Stop it before starting another task.`;
+    else if (activeJob) note.textContent = `${hybridNotice}Send a follow-up to steer this task. Attachments can be used on your next task.`;
+    else note.textContent = `${hybridNotice}Local AI can make mistakes. Review important details.`;
     const indicator = $("#model-indicator");
     indicator.replaceChildren();
     const dot = document.createElement("span");
@@ -245,7 +256,12 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     const label = document.createElement("span");
     const selected = state?.settings?.model;
     const selectedPresent = selected && models.some((model) => model.name === selected);
-    label.textContent = activeJob ? "Local task running" : ready ? (selectedPresent ? selected : `${models.length} local model${models.length === 1 ? "" : "s"} available`) : "No ready local chat model";
+    const inference = activeJob?.inference;
+    label.textContent = inference?.location === "online"
+      ? `Online · ${providerName(inference.provider)}${inference.model ? ` · ${inference.model}` : ""}`
+      : activeJob ? (onlineModeDraft === "hybrid" ? "Hybrid task running" : "Local task running")
+        : ready ? (onlineModeDraft === "hybrid" ? (hasOnlineRoutes() ? "Online routes enabled · local fallback" : "Hybrid mode · local only") : (selectedPresent ? selected : `${models.length} local model${models.length === 1 ? "" : "s"} available`))
+          : "No ready local chat model";
     indicator.append(dot, label);
 
     const list = $("#model-list");
@@ -366,6 +382,262 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     $("#discord-view-copy").textContent = status;
     $("#discord-connection-value").textContent = connected ? "Connected" : (configured ? "Configured, offline" : "Not configured");
     $("#discord-badge").textContent = connected ? "CONNECTED" : (configured ? "CONFIGURED" : "OPTIONAL");
+  }
+
+  const onlineProviderOptions = [
+    ["nvidia", "NVIDIA"], ["openrouter", "OpenRouter"], ["groq", "Groq"],
+    ["google", "Google"], ["gateway", "Local gateway"]
+  ];
+  const onlineRoles = [["chat", "Chat"], ["analysis", "Analysis"], ["code", "Code"], ["files", "Files"]];
+
+  function providerName(id) { return onlineProviderOptions.find(([value]) => value === id)?.[1] || String(id || "Provider"); }
+  function hasOnlineRoutes() { return onlineRoutesDraft.some((route) => route.model && route.roles.length); }
+
+  function updateHybridCopy() {
+    if (onlineModeDraft !== "hybrid") {
+      $("#welcome-copy").textContent = "Ask a question, shape an idea, or bring a file into the conversation. Messages are saved in this workspace.";
+      return;
+    }
+    $("#welcome-copy").textContent = hasOnlineRoutes()
+      ? "Messages are saved in this workspace. Hybrid mode tries configured online routes for eligible text tasks and may send task text and context to those providers."
+      : "Hybrid mode is selected, but no online routes are configured. Tasks still use local inference.";
+  }
+
+  function normalizeOnlineConfig(config) {
+    const mode = config?.mode === "hybrid" ? "hybrid" : "local";
+    const routes = Array.isArray(config?.routes) ? config.routes.slice(0, 8).map((route) => ({
+      provider: onlineProviderOptions.some(([id]) => id === route?.provider) ? route.provider : "nvidia",
+      model: typeof route?.model === "string" ? route.model : "",
+      roles: Array.isArray(route?.roles) ? onlineRoles.map(([id]) => id).filter((id) => route.roles.includes(id)) : ["chat", "analysis", "code", "files"]
+    })) : [];
+    return { mode, routes, gateway_url: typeof config?.gateway_url === "string" ? config.gateway_url : "", allow_paid: false };
+  }
+
+  function renderOnline(payload, { force = false } = {}) {
+    if (!payload || typeof payload !== "object") return;
+    onlineProviders = Array.isArray(payload.providers) ? payload.providers : onlineProviders;
+    onlineRouteStatuses = Array.isArray(payload.routes) ? payload.routes : onlineRouteStatuses;
+    for (const item of onlineProviders) if (item?.id) {
+      if (item.configured === true) onlineKeyConfigured.add(item.id);
+      else onlineKeyConfigured.delete(item.id);
+    }
+    for (const item of onlineRouteStatuses) if (item?.provider && (item.key_configured === true || item.ready === true)) onlineKeyConfigured.add(item.provider);
+    if (onlineConfigDirty) {
+      onlineModeDraft = $("#online-mode").value;
+      onlineGatewayDraft = $("#online-gateway-url").value;
+      onlineRoutesDraft = readOnlineRoutes();
+    }
+    if (!onlineConfigDirty || force) {
+      const config = normalizeOnlineConfig(payload.config || payload.online?.config || payload);
+      onlineModeDraft = config.mode;
+      onlineRoutesDraft = config.routes;
+      onlineGatewayDraft = config.gateway_url;
+      onlineConfigDirty = false;
+      onlineCatalogs.clear();
+    }
+    $("#online-mode").value = onlineModeDraft;
+    $("#online-gateway-url").value = onlineGatewayDraft;
+    $("#online-mode-badge").textContent = onlineModeDraft === "hybrid" ? "HYBRID" : "LOCAL ONLY";
+    $("#online-disclosure").classList.toggle("hidden", onlineModeDraft !== "hybrid");
+    updateHybridCopy();
+    $("#gateway-url-wrap").classList.toggle("hidden", $("#online-key-provider").value !== "gateway");
+    const provider = $("#online-key-provider").value;
+    const providerStatus = onlineProviders.find((item) => item?.id === provider) || (() => {
+      const matches = onlineRouteStatuses.filter((item) => item?.provider === provider);
+      return matches.length ? {
+        configured: matches.some((item) => item.key_configured === true || item.ready === true),
+        cooldown_seconds: Math.max(0, ...matches.map((item) => Number(item.cooldown_seconds) || 0)),
+        status: matches.some((item) => item.auth_blocked === true) ? "key needs attention" : ""
+      } : onlineKeyConfigured.has(provider) ? { configured: true, status: "" } : null;
+    })();
+    $("#online-provider-meta").textContent = providerStatus
+      ? `${providerName(provider)} · ${provider === "gateway" ? (providerStatus.configured ? "gateway configured" : "not configured") : (providerStatus.configured ? "key configured for this session" : "not configured")}${Number(providerStatus.cooldown_seconds) > 0 ? ` · quota cooldown ${Math.ceil(providerStatus.cooldown_seconds)}s` : ""}${providerStatus.status ? ` · ${providerStatus.status}` : ""}`
+      : `${providerName(provider)} key is optional until a route uses this provider.`;
+    renderOnlineRoutes();
+    const inference = state?.active_job?.inference;
+    renderJobInference(inference);
+    renderModelStatus();
+  }
+
+  function renderOnlineRoutes() {
+    const container = $("#online-routes");
+    container.replaceChildren();
+    if (!onlineRoutesDraft.length) {
+      const empty = document.createElement("div");
+      empty.className = "online-empty";
+      empty.textContent = "No online routes are configured. Local inference remains the only available path.";
+      container.append(empty);
+    }
+    onlineRoutesDraft.forEach((route, index) => {
+      const card = document.createElement("div");
+      card.className = "online-route";
+      card.dataset.routeIndex = String(index);
+      const title = document.createElement("div");
+      title.className = "online-route-index";
+      title.textContent = `Route ${index + 1}`;
+      card.append(title);
+
+      const providerLabel = document.createElement("label");
+      providerLabel.className = "online-field";
+      providerLabel.textContent = "Provider";
+      const providerSelect = document.createElement("select");
+      providerSelect.dataset.field = "provider";
+      for (const [id, name] of onlineProviderOptions) {
+        const option = document.createElement("option"); option.value = id; option.textContent = name; providerSelect.append(option);
+      }
+      providerSelect.value = route.provider;
+      providerLabel.append(providerSelect);
+      card.append(providerLabel);
+
+      const modelLabel = document.createElement("label");
+      modelLabel.className = "online-field";
+      modelLabel.textContent = "Model ID";
+      const modelInput = document.createElement("input");
+      modelInput.type = "text"; modelInput.autocomplete = "off"; modelInput.spellcheck = false;
+      modelInput.placeholder = "Provider model ID"; modelInput.value = route.model; modelInput.dataset.field = "model";
+      modelLabel.append(modelInput);
+      card.append(modelLabel);
+
+      const controls = document.createElement("div"); controls.className = "online-route-controls";
+      for (const [label, action, disabled] of [["↑", "up", index === 0], ["↓", "down", index === onlineRoutesDraft.length - 1], ["Remove", "remove", false]]) {
+        const button = document.createElement("button"); button.type = "button"; button.className = "quiet-button";
+        button.textContent = label; button.dataset.action = action; button.disabled = disabled;
+        button.setAttribute("aria-label", action === "remove" ? `Remove route ${index + 1}` : `${action === "up" ? "Move route up" : "Move route down"}`);
+        controls.append(button);
+      }
+      card.append(controls);
+
+      const catalogWrap = document.createElement("div"); catalogWrap.className = "online-route-catalog";
+      const catalogLabel = document.createElement("label"); catalogLabel.className = "online-field"; catalogLabel.textContent = "Available models";
+      const catalog = document.createElement("select"); catalog.dataset.field = "catalog";
+      const placeholder = document.createElement("option"); placeholder.value = ""; placeholder.textContent = onlineCatalogs.has(index) ? "Choose a loaded model" : "Load models to browse"; catalog.append(placeholder);
+      for (const item of onlineCatalogs.get(index) || []) {
+        const option = document.createElement("option"); option.value = String(item.id || ""); option.textContent = String(item.name || item.id || "Model"); catalog.append(option);
+      }
+      catalog.value = (onlineCatalogs.get(index) || []).some((item) => item.id === route.model) ? route.model : "";
+      catalogLabel.append(catalog);
+      const load = document.createElement("button"); load.type = "button"; load.className = "quiet-button"; load.textContent = "Load models"; load.dataset.action = "catalog";
+      catalogWrap.append(catalogLabel, load); card.append(catalogWrap);
+
+      const roles = document.createElement("div"); roles.className = "online-role-list"; roles.setAttribute("aria-label", "Task roles for this route");
+      for (const [id, name] of onlineRoles) {
+        const label = document.createElement("label"); const checkbox = document.createElement("input");
+        checkbox.type = "checkbox"; checkbox.value = id; checkbox.dataset.field = "role"; checkbox.checked = route.roles.includes(id);
+        label.append(checkbox, document.createTextNode(name)); roles.append(label);
+      }
+      card.append(roles);
+      container.append(card);
+    });
+    $("#online-add-route").disabled = onlineRoutesDraft.length >= 8;
+  }
+
+  function renderJobInference(inference) {
+    const notice = $("#job-inference");
+    const provider = typeof inference?.provider === "string" ? inference.provider : "";
+    const model = typeof inference?.model === "string" ? inference.model : "";
+    if (!provider && !model) { notice.classList.add("hidden"); notice.textContent = ""; return; }
+    const isOnline = inference?.location === "online";
+    notice.textContent = `${isOnline ? "Online model used" : "Local model"}${provider ? ` · ${providerName(provider)}` : ""}${model ? ` · ${model}` : ""}${isOnline ? " · Eligible task text/context sent to provider" : ""}`;
+    notice.classList.remove("hidden");
+  }
+
+  async function loadOnlineState({ force = false } = {}) {
+    try { renderOnline(await request("/online"), { force }); }
+    catch (error) {
+      if (force || !onlineConfigDirty) $("#online-feedback").textContent = error.message || "Online model setup is unavailable.";
+    }
+  }
+
+  async function loadOnlineCatalog(index) {
+    const route = onlineRoutesDraft[index];
+    if (!route) return;
+    const button = $(`.online-route[data-route-index="${index}"] [data-action="catalog"]`);
+    if (onlineModeDraft !== "hybrid") {
+      setOnlineFeedback("Select Hybrid mode and acknowledge the task data disclosure before loading an online catalog.", true);
+      return;
+    }
+    if (!$("#online-consent").checked) {
+      setOnlineFeedback("Acknowledge the task data disclosure before configuring an online provider.", true);
+      return;
+    }
+    button.disabled = true; button.textContent = "Loading…";
+    try {
+      const key = $("#online-api-key").value.trim();
+      const keyProvider = $("#online-key-provider").value;
+      const routes = readOnlineRoutes().filter((item) => item.model && item.roles.length);
+      if (onlineConfigDirty || key) {
+        const config = { mode: "hybrid", routes, gateway_url: $("#online-gateway-url").value.trim(), allow_paid: false };
+        const body = { config, consent: true, ...(key ? { keys: { [keyProvider]: key } } : {}) };
+        try {
+          const configured = await post("/online/configure", body);
+          if (key) onlineKeyConfigured.add(keyProvider);
+          state = state || {}; state.online = configured;
+          renderOnline(configured);
+        } finally {
+          body.keys = undefined;
+          $("#online-api-key").value = "";
+        }
+      }
+      const result = await post("/online/catalog", { provider: route.provider });
+      onlineCatalogs.set(index, Array.isArray(result?.models) ? result.models : []);
+      renderOnlineRoutes();
+      $(`#online-routes .online-route[data-route-index="${index}"] [data-field="catalog"]`)?.focus();
+      $("#online-feedback").textContent = `${onlineCatalogs.get(index).length} model${onlineCatalogs.get(index).length === 1 ? "" : "s"} loaded for ${providerName(route.provider)}.`;
+    } catch (error) {
+      button.textContent = "Load models"; button.disabled = false;
+      setOnlineFeedback(error.message || "Could not load models.", true);
+    }
+  }
+
+  function setOnlineFeedback(message, isError = false) {
+    const node = $("#online-feedback"); node.textContent = message; node.classList.toggle("is-error", isError);
+  }
+
+  function readOnlineRoutes() {
+    return $$(".online-route", $("#online-routes")).map((card) => ({
+      provider: $("[data-field='provider']", card).value,
+      model: $("[data-field='model']", card).value.trim(),
+      roles: $$("[data-field='role']:checked", card).map((item) => item.value)
+    }));
+  }
+
+  async function saveOnlineSettings(clearKey = false) {
+    const mode = $("#online-mode").value;
+    const consent = $("#online-consent").checked;
+    if (mode === "hybrid" && !consent) return setOnlineFeedback("Acknowledge the task data disclosure before enabling hybrid mode.", true);
+    const routes = readOnlineRoutes();
+    if (routes.length > 8) return setOnlineFeedback("Use no more than eight fallback routes.", true);
+    if (routes.some((route) => !route.model || !route.roles.length)) return setOnlineFeedback("Give each route a model ID and at least one task role.", true);
+    const gatewayURL = $("#online-gateway-url").value.trim();
+    if (gatewayURL) {
+      let parsed;
+      try { parsed = new URL(gatewayURL); } catch { return setOnlineFeedback("Enter a valid local gateway URL ending in /v1.", true); }
+      if (parsed.protocol !== "http:" || parsed.username || parsed.password || parsed.search || parsed.hash || !["localhost", "127.0.0.1"].includes(parsed.hostname) || !parsed.port || parsed.pathname !== "/v1") {
+        return setOnlineFeedback("The gateway URL must use http://localhost:<port>/v1 or 127.0.0.1:<port>/v1.", true);
+      }
+    }
+    const provider = $("#online-key-provider").value;
+    const key = $("#online-api-key").value.trim();
+    const config = { mode, routes, gateway_url: gatewayURL, allow_paid: false };
+    const body = { config, consent, ...(key ? { keys: { [provider]: key } } : {}), ...(clearKey ? { clear_keys: [provider] } : {}) };
+    const save = $("#online-save"); save.disabled = true; save.setAttribute("aria-busy", "true");
+    setOnlineFeedback("Saving online model settings…");
+    try {
+      const result = await post("/online/configure", body);
+      if (key) onlineKeyConfigured.add(provider);
+      if (clearKey) onlineKeyConfigured.delete(provider);
+      onlineConfigDirty = false;
+      state = state || {}; state.online = result;
+      renderOnline(result, { force: true });
+      setOnlineFeedback("Online model settings saved. API key field cleared; keys remain session-only.");
+    } catch (error) {
+      setOnlineFeedback(error.message || "Could not save online model settings.", true);
+    } finally {
+      body.keys = undefined;
+      $("#online-api-key").value = "";
+      save.disabled = false; save.removeAttribute("aria-busy");
+      if (clearKey) loadOnlineState({ force: true });
+    }
   }
 
   function renderDiscord() {
@@ -684,6 +956,8 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     updateProfileCount();
     $("#adapter-status").textContent = "No adapter training starts automatically. Use a separate explicit local action if training is enabled.";
     renderDiscord();
+    renderOnline(state?.online);
+    loadOnlineState();
     $("#project-path").value = String(state?.settings?.project_path || "");
     applyTheme(state?.settings?.theme || theme);
     renderModelStatus();
@@ -734,6 +1008,7 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
       if (first || !$("#messages").children.length) renderCurrentChat();
       discordStatusPollTimedOut = false;
       renderDiscord();
+      if (result.online) renderOnline(result.online);
       renderModelStatus();
       renderWorkspaceMenu();
       setConnection(true, "Connected to local Mavi");
@@ -775,6 +1050,7 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     const bar = $("#job-progress-bar");
     const spinner = $(".job-spinner", card);
     if (!job) {
+      renderJobInference(null);
       renderJobQuestion(null);
       card.classList.add("hidden");
       card.classList.remove("image-generating");
@@ -783,6 +1059,7 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
       spinner.classList.add("hidden");
       return;
     }
+    renderJobInference(job.inference);
     card.classList.remove("hidden");
     const stopping = Boolean(activeJob?.stopping) || String(job.status || "").toLowerCase() === "stopping";
     const status = stopping ? "Stopping" : String(job.status || "working").replaceAll("_", " ");
@@ -809,7 +1086,7 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     }
 
     let progressText = stopping ? "Waiting for the local task to stop…" :
-      (typeof job.progress === "string" ? job.progress : "Mavi is working on your request locally.");
+      (typeof job.progress === "string" ? job.progress : "Mavi is working on your request.");
     const elapsed = typeof job.elapsed === "number" && Number.isFinite(job.elapsed) && job.elapsed >= 0 ? Math.round(job.elapsed) :
       (active && !waiting && !stopping && typeof job.started === "number" && Number.isFinite(job.started) ?
         Math.max(0, Math.floor(Date.now() / 1000 - job.started)) : null);
@@ -1784,6 +2061,68 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     $("#clear-history-settings").addEventListener("click", clearHistory);
     $("#settings-profile").addEventListener("input", updateProfileCount);
     $("#save-settings-profile").addEventListener("click", saveSettingsProfile);
+    $("#online-mode").addEventListener("change", () => {
+      onlineModeDraft = $("#online-mode").value; onlineConfigDirty = true;
+      if (onlineModeDraft === "local") $("#online-consent").checked = false;
+      $("#online-disclosure").classList.toggle("hidden", onlineModeDraft !== "hybrid");
+      $("#online-mode-badge").textContent = onlineModeDraft === "hybrid" ? "HYBRID" : "LOCAL ONLY";
+      updateHybridCopy();
+      renderModelStatus();
+    });
+    $("#online-key-provider").addEventListener("change", () => {
+      $("#online-api-key").value = "";
+      $("#gateway-url-wrap").classList.toggle("hidden", $("#online-key-provider").value !== "gateway");
+      const config = { mode: onlineModeDraft, routes: onlineRoutesDraft, gateway_url: onlineGatewayDraft };
+      renderOnline({ config, providers: onlineProviders });
+    });
+    $("#online-gateway-url").addEventListener("input", (event) => { onlineGatewayDraft = event.target.value; onlineConfigDirty = true; });
+    $("#online-add-route").addEventListener("click", () => {
+      onlineRoutesDraft = readOnlineRoutes();
+      if (onlineRoutesDraft.length >= 8) return;
+      onlineRoutesDraft.push({ provider: $("#online-key-provider").value, model: "", roles: ["chat", "analysis", "code", "files"] });
+      onlineConfigDirty = true; renderOnlineRoutes(); updateHybridCopy(); renderModelStatus();
+    });
+    $("#online-routes").addEventListener("input", (event) => {
+      if (event.target.matches("[data-field='model'], [data-field='role']")) {
+        onlineRoutesDraft = readOnlineRoutes(); onlineConfigDirty = true;
+        updateHybridCopy(); renderModelStatus();
+      }
+    });
+    $("#online-routes").addEventListener("change", (event) => {
+      const card = event.target.closest(".online-route");
+      if (!card) return;
+      const index = Number(card.dataset.routeIndex);
+      if (event.target.matches("[data-field='provider']")) {
+        onlineRoutesDraft = readOnlineRoutes();
+        onlineRoutesDraft[index].provider = event.target.value;
+        onlineRoutesDraft[index].model = "";
+        onlineCatalogs.delete(index);
+        onlineConfigDirty = true; renderOnlineRoutes(); updateHybridCopy(); renderModelStatus();
+      } else if (event.target.matches("[data-field='catalog']")) {
+        onlineRoutesDraft = readOnlineRoutes();
+        const picked = event.target.value;
+        if (picked) onlineRoutesDraft[index].model = picked;
+        renderOnlineRoutes();
+        $(`#online-routes .online-route[data-route-index="${index}"] [data-field="model"]`)?.focus();
+        onlineConfigDirty = true;
+        updateHybridCopy(); renderModelStatus();
+      }
+    });
+    $("#online-routes").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-action]");
+      const card = event.target.closest(".online-route");
+      if (!button || !card) return;
+      const index = Number(card.dataset.routeIndex);
+      if (button.dataset.action === "catalog") return loadOnlineCatalog(index);
+      onlineRoutesDraft = readOnlineRoutes();
+      if (button.dataset.action === "remove") onlineRoutesDraft.splice(index, 1);
+      else if (button.dataset.action === "up" && index > 0) [onlineRoutesDraft[index - 1], onlineRoutesDraft[index]] = [onlineRoutesDraft[index], onlineRoutesDraft[index - 1]];
+      else if (button.dataset.action === "down" && index < onlineRoutesDraft.length - 1) [onlineRoutesDraft[index + 1], onlineRoutesDraft[index]] = [onlineRoutesDraft[index], onlineRoutesDraft[index + 1]];
+      onlineConfigDirty = true; onlineCatalogs.clear(); renderOnlineRoutes(); updateHybridCopy(); renderModelStatus();
+    });
+    $("#online-save").addEventListener("click", () => saveOnlineSettings(false));
+    $("#online-clear-key").addEventListener("click", () => saveOnlineSettings(true));
+    window.addEventListener("pagehide", () => { $("#online-api-key").value = ""; });
     $("#discord-setup-form").addEventListener("submit", (event) => { event.preventDefault(); saveDiscordSettings(); });
     $("#discord-copy-invite").addEventListener("click", copyDiscordInvite);
     ["#discord-application", "#discord-channel", "#discord-users", "#discord-enabled", "#discord-allow-tasks"].forEach((selector) => {

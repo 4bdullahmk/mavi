@@ -397,22 +397,27 @@ def _worker_fleet(text: str, attachments: Any, context: dict[str, Any]) -> str:
     task = text.strip()
     if not task or len(task) > MAX_TASK:
         raise ValueError("Describe a worker-fleet task under 6,000 characters.")
-    installed = _ollama_models()
-    models = _fleet_model_selection(installed, context.get("model"))
+    online_models = list(dict.fromkeys(context.get("online_models", [])))
+    online_fleet = len(online_models) >= 2
+    installed = [] if online_fleet else _ollama_models()
+    models = online_models[:2] if online_fleet else _fleet_model_selection(installed, context.get("model"))
     if len(models) < 2:
         raise RuntimeError("A local worker fleet needs at least two distinct supported Ollama models. Install a second standard local model; Mavi will not download it automatically.")
     _check_cancelled(context)
-    model_sizes = _ollama_model_sizes(models)
-    resident_models = _ollama_running_models()
-    worker_count, capacity_reason = _fleet_parallel_workers(models, model_sizes, _available_system_ram_bytes(), resident_models)
+    model_sizes = {} if online_fleet else _ollama_model_sizes(models)
+    resident_models = {} if online_fleet else _ollama_running_models()
+    if online_fleet:
+        worker_count, capacity_reason = 2, "Configured online models handle inference; shared files and tools stay local."
+    else:
+        worker_count, capacity_reason = _fleet_parallel_workers(models, model_sizes, _available_system_ram_bytes(), resident_models)
     evidence, cache_hits = _fleet_evidence(task, attachments, context)
     evidence_block = _fleet_evidence_text(evidence)
     root_id = uuid.uuid4().hex
-    root_event = _fleet_event(context, root_id, None, "Local worker fleet", "local coordinator", "running", "Preparing shared evidence and independent worker assignments.")
+    root_event = _fleet_event(context, root_id, None, "Hybrid worker fleet" if online_fleet else "Local worker fleet", "local coordinator", "running", "Preparing shared evidence and independent worker assignments.")
     model_a, model_b = models[0], models[1]
     # The lead reuses the largest selected model; size is only a capability proxy.
     # Reusing it avoids loading a third resident model just for review.
-    lead_model = _fleet_lead_model(models, model_sizes, context.get("model"))
+    lead_model = models[0] if online_fleet else _fleet_lead_model(models, model_sizes, context.get("model"))
     analyst = _fleet_event(context, uuid.uuid4().hex, root_id, "Evidence analyst", model_a, "pending", "Waiting for the shared evidence packet.", task="Extract relevant facts, cite supplied evidence, and identify missing information.")
     planner = _fleet_event(context, uuid.uuid4().hex, root_id, "Independent planner", model_b, "pending", "Waiting for the shared evidence packet.", task="Independently draft a solution to the request using the shared evidence.")
     reviewer = _fleet_event(context, uuid.uuid4().hex, root_id, "Lead synthesizer", lead_model, "pending", "Will check the independent outputs against the same evidence.", task="Compare worker outputs, resolve disagreements, and write the checked final result.")
@@ -429,7 +434,7 @@ def _worker_fleet(text: str, attachments: Any, context: dict[str, Any]) -> str:
             {"role": "user", "content": shared_header + "\n\nReturn an independent draft answer, at most 3,500 characters."},
         ],
     }
-    _progress(context, f"Starting two independent local workers ({'parallel' if worker_count == 2 else 'one at a time'}); {capacity_reason} Shared evidence blocks: {len(evidence)}, read-cache hits: {cache_hits}.")
+    _progress(context, f"Starting two independent {'online' if online_fleet else 'local'} workers ({'parallel' if worker_count == 2 else 'one at a time'}); {capacity_reason} Shared evidence blocks: {len(evidence)}, read-cache hits: {cache_hits}.")
     results: dict[str, str] = {}
     futures = {}
     try:
@@ -449,6 +454,7 @@ def _worker_fleet(text: str, attachments: Any, context: dict[str, Any]) -> str:
                     role, event = futures[future]
                     result = future.result()
                     results[role] = result[:MAX_FLEET_ANSWER_CHARS]
+                    event['model'] = context.get('model_results', {}).get(event['model'], event['model'])
                     _fleet_transition(context, event, "completed", "Independent evidence brief ready." if role == "analyst" else "Independent draft ready for review.")
                     _progress(context, f"Worker complete: {event['name']} ({event['model']}).")
         _check_cancelled(context)
@@ -458,9 +464,10 @@ def _worker_fleet(text: str, attachments: Any, context: dict[str, Any]) -> str:
             {"role": "user", "content": shared_header + f"\n\nEVIDENCE ANALYST:\n{results['analyst']}\n\nINDEPENDENT DRAFT:\n{results['planner']}"},
         ]
         final = _call_model(context, reviewer_messages, lead_model)[:8_000]
+        reviewer['model'] = context.get('model_results', {}).get(lead_model, lead_model)
         _fleet_transition(context, reviewer, "completed", "Final answer checked against the shared evidence packet.")
         evidence_names = "; ".join(f"[{item['id']}] {item['label']}" for item in evidence) or "none supplied"
-        final += f"\n\nWorker fleet: analyst {model_a}, planner {model_b}, lead synthesizer {lead_model}. Shared evidence: {evidence_names}. Read-cache hits: {cache_hits}."
+        final += f"\n\nWorker fleet: analyst {analyst['model']}, planner {planner['model']}, lead synthesizer {reviewer['model']}. Shared evidence: {evidence_names}. Read-cache hits: {cache_hits}."
         _fleet_transition(context, root_event, "completed", "Fleet review finished; evidence and model use are listed in the result.")
         return final[:MAX_FLEET_ANSWER_CHARS]
     except InterruptedError:

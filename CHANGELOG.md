@@ -1,5 +1,12 @@
 # Mavi changes
 
+## 2.0.1 — hybrid model routing (build 31)
+
+- Add opt-in Hybrid routing for selected text-only chat, analysis, code, and file tasks through NVIDIA NIM, OpenRouter, Groq, Google AI, or a user-configured loopback OpenAI-compatible gateway. Local-only inference remains the default.
+- Require explicit data-disclosure consent. API keys remain memory-only, are cleared on runtime reload, and are never included in saved settings or provider status responses.
+- Restrict outbound requests to fixed provider endpoints or an explicitly configured loopback gateway; reject redirects, bound requests and responses, respect rate-limit cooldowns, and fall back through configured routes. Screenshots, images, and computer-control tasks stay local.
+- Add provider/model provenance to completed online tasks and session-only provider status/catalog controls. Hybrid provider behavior and billing have not been live-tested.
+
 ## 2.0.1 — browser and desktop control fixes
 
 - Route explicit browser targets and URLs to the requested browser, and return to the active control flow when a permission request is declined or needs follow-up.

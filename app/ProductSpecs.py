@@ -19,7 +19,7 @@ class Redirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self,req,fp,code,msg,headers,url):return super().redirect_request(req,fp,code,msg,headers,check(url))
 def run(url):
     opener=urllib.request.build_opener(Redirect())
-    with opener.open(urllib.request.Request(check(url),headers={'User-Agent':'WorkDesk-ProductLookup/1.0'}),timeout=25) as response:
+    with opener.open(urllib.request.Request(check(url),headers={'User-Agent':'Mavi-ProductLookup/1.0'}),timeout=25) as response:
         if 'html' not in response.headers.get('Content-Type',''):raise ValueError('Use an HTML product page')
         data=response.read(2_000_001)
         if len(data)>2_000_000:raise ValueError('Product page is too large; attach its specification sheet instead')

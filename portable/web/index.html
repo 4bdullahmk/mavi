@@ -35,7 +35,7 @@
       <div class="sidebar-footer">
         <div class="local-badge"><span class="status-dot" id="connection-dot"></span><span id="connection-label">Connecting locally</span></div>
         <button class="nav-item settings-link" data-view="settings"><span class="nav-icon">⚙</span><span>Settings</span></button>
-        <div class="sidebar-build">Private by default <span>·</span> Local workspace</div>
+        <div class="sidebar-build">Local workspace <span>·</span> Optional hybrid routing</div>
       </div>
     </aside>
 
@@ -71,7 +71,7 @@
             <div class="welcome-symbol" aria-hidden="true"><img src="mavi-mark.png" alt=""></div>
             <p class="eyebrow">YOUR LOCAL WORKSPACE</p>
             <h1>What can I help<br>you work through?</h1>
-            <p class="welcome-copy">Ask a question, shape an idea, or bring a file into the conversation. Your messages stay in this workspace.</p>
+            <p class="welcome-copy" id="welcome-copy">Ask a question, shape an idea, or bring a file into the conversation. Messages are saved in this workspace.</p>
             <div class="suggestion-grid">
               <button class="suggestion" data-prompt="Help me think through a decision and give me a few clear options."><span>01</span><b>Think through a decision</b><small>Compare options with a clear rationale</small></button>
               <button class="suggestion" data-prompt="Summarize the key points in this file."><span>02</span><b>Make sense of a file</b><small>Pull out the useful parts quickly</small></button>
@@ -80,7 +80,8 @@
           </div>
           <div class="messages" id="messages" aria-live="polite"></div>
           <div class="job-card hidden" id="job-card" aria-live="polite">
-            <div class="job-top"><span class="job-spinner" aria-hidden="true"></span><div><strong id="job-status">Working locally</strong><p id="job-progress">Mavi is working on your request.</p></div><button class="quiet-button stop-button" id="stop-job">Stop</button></div>
+            <div class="job-top"><span class="job-spinner" aria-hidden="true"></span><div><strong id="job-status">Working</strong><p id="job-progress">Mavi is working on your request.</p></div><button class="quiet-button stop-button" id="stop-job">Stop</button></div>
+            <p class="job-inference hidden" id="job-inference"></p>
             <div class="image-placeholder" role="img" aria-label="Image generation in progress"><span>Creating your image</span></div>
             <div class="progress-track" id="job-progress-track" role="progressbar" aria-label="Task progress"><span id="job-progress-bar"></span></div>
             <div class="job-question hidden" id="job-question"></div>
@@ -146,6 +147,26 @@
             <div id="model-list" class="model-list"><div class="empty-models">Checking for installed local models…</div></div>
             <label class="model-select-row">Preferred model<select id="model-select" aria-label="Preferred model"></select></label>
             <p class="settings-help" id="hardware-note">Status is reported by the local workspace. Many local models work best with 32 GB or more of memory and an NVIDIA GPU; capability status comes from the backend.</p>
+          </section>
+          <section class="settings-card online-model-card" aria-labelledby="online-model-heading">
+            <div class="card-heading"><div><h2 id="online-model-heading">Online models</h2><p>Choose local-only inference or configure online routes for eligible text tasks.</p></div><span class="local-tag" id="online-mode-badge">LOCAL ONLY</span></div>
+            <label class="online-field">Inference mode<select id="online-mode"><option value="local">Local only (default)</option><option value="hybrid">Hybrid: online routes with local fallback</option></select></label>
+            <div class="online-disclosure" id="online-disclosure">
+              <strong>Before enabling hybrid</strong>
+              <p>Hybrid mode tries your configured online routes first for eligible text tasks and uses local inference when routes are unavailable. The current task text, conversation context, saved preference profile, and attached text excerpts may be sent to those providers. Screenshots and computer-control content stay local. Discord uses local inference in this setup. Provider usage and quotas are controlled by each provider; routes do not mean unlimited usage. OpenRouter is restricted to free models in this setup.</p>
+              <label class="online-consent"><input id="online-consent" type="checkbox"><span>I understand that eligible task text, context, saved preferences, and attached text may be sent to the configured online providers.</span></label>
+            </div>
+            <div class="online-provider-row">
+              <label class="online-field">Provider<select id="online-key-provider"><option value="nvidia">NVIDIA</option><option value="openrouter">OpenRouter</option><option value="groq">Groq</option><option value="google">Google</option><option value="gateway">Local gateway</option></select></label>
+              <label class="online-field online-key-field">API key<input id="online-api-key" type="password" autocomplete="new-password" placeholder="Enter key for selected provider" spellcheck="false"><small>Sent only when you configure. The field clears after the request; Mavi keeps keys in this session only.</small></label>
+            </div>
+            <div class="online-provider-meta" id="online-provider-meta" aria-live="polite">Provider status will appear here.</div>
+            <label class="online-field gateway-url-field hidden" id="gateway-url-wrap">Local gateway URL (optional)<input id="online-gateway-url" type="url" placeholder="http://127.0.0.1:8080/v1"><small>Only use a trusted loopback proxy. This does not install or integrate a model harness.</small></label>
+            <p class="settings-help">Optional reference: <a href="https://github.com/Alishahryar1/free-claude-code" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">free-claude-code project</a>. No harness integration or installation is claimed.</p>
+            <div class="online-route-heading"><div><h3>Ordered online routes</h3><p>Providers are tried in order, up to eight. Choose which text roles each model may handle. Load models can browse a provider catalog after its key and hybrid mode are configured.</p></div><button class="quiet-button" id="online-add-route" type="button">Add route</button></div>
+            <div class="online-routes" id="online-routes" aria-live="polite"></div>
+            <p class="online-feedback" id="online-feedback" role="status" aria-live="polite"></p>
+            <div class="online-actions"><button class="quiet-button" id="online-clear-key" type="button">Clear selected provider key</button><button class="primary-button" id="online-save" type="button">Save online settings</button></div>
           </section>
           <section class="settings-card">
             <h2>Appearance</h2><p>Choose how Mavi looks on this device.</p>

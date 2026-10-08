@@ -734,7 +734,7 @@ struct UnifiedAnswer: Error { let text: String }
     static func fallbackRoute(_ text:String) -> String {
         if UnifiedPlanning.directMaviUpdatePlan(text) != nil { return "update" }
         let lower=text.lowercased()
-        if ["update work desk","change work desk","improve work desk","fix work desk","update sable","change sable","improve sable","fix sable","update mavi","change mavi","improve mavi","fix mavi"].contains(where:lower.contains) { return "update" }
+        if ["update sable","change sable","improve sable","fix sable","update mavi","change mavi","improve mavi","fix mavi"].contains(where:lower.contains) { return "update" }
         if let route = explicitRoute(text), route != "computer" { return route }
         if explicitRoute(text) == "computer" { return "computer" }
         if ["stock","market","portfolio","ticker","filing","trade plan"].contains(where:lower.contains) { return "stocks" }

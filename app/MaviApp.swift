@@ -1133,13 +1133,13 @@ struct StatusDot: View {
 }
 private struct MaviNewConversationKey: FocusedValueKey { typealias Value = () -> Void }
 private extension FocusedValues {
-    var workDeskNewConversation: (() -> Void)? {
+    var maviNewConversation: (() -> Void)? {
         get { self[MaviNewConversationKey.self] }
         set { self[MaviNewConversationKey.self] = newValue }
     }
 }
 private struct MaviCommands: Commands {
-    @FocusedValue(\.workDeskNewConversation) private var newConversation
+    @FocusedValue(\.maviNewConversation) private var newConversation
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Conversation") { newConversation?() }
@@ -1281,7 +1281,7 @@ struct ContentView: View {
             discordWorkspace.configure(desk:desk,agent:unifiedAgent,remote:discordRemote,updates:updateState,studio:modelingStudio,browser:browserState)
             await desk.start()
         }
-        .focusedSceneValue(\.workDeskNewConversation, canStartConversation ? { desk.reset() } : nil)
+        .focusedSceneValue(\.maviNewConversation, canStartConversation ? { desk.reset() } : nil)
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in desk.permissions() }
         .onChange(of:desk.mode) { old,new in workspaceDrafts[old]=desk.draft;desk.draft=workspaceDrafts[new] ?? "" }
         .sheet(isPresented:$showDiscord) { VStack { ScrollView { DiscordPanel(remote:discordRemote,workspace:discordWorkspace).padding(20) }; HStack { Spacer();Button("Done") { showDiscord=false }.keyboardShortcut(.defaultAction) }.padding() }.frame(minWidth:680,minHeight:640) }

@@ -12,7 +12,7 @@ import AppKit
     @Published var automaticInstall = false
     var process: Process?
     init() {
-        let saved=UserDefaults.standard.string(forKey:"WorkDeskUpdateCandidate") ?? ""
+        let saved=UserDefaults.standard.string(forKey:"MaviUpdateCandidate") ?? ""
         if FileManager.default.fileExists(atPath:saved+"/manifest.json") { runPath=saved; candidatePath=saved+"/Mavi.app" }
     }
     func event(_ data:Data) {
@@ -20,7 +20,7 @@ import AppKit
         if type == "token" || type == "log" { log=String((log+(value["text"] ?? "")).suffix(80000)) }
         if type == "ready" {
             runPath=value["run"] ?? ""; candidatePath=value["app"] ?? ""; status="Build and baseline tests passed"
-            UserDefaults.standard.set(runPath,forKey:"WorkDeskUpdateCandidate")
+            UserDefaults.standard.set(runPath,forKey:"MaviUpdateCandidate")
         }
         if type == "error" { status="Failed: "+(value["text"] ?? "Unknown error") }
     }
@@ -30,7 +30,7 @@ import AppKit
         let source=resources.appendingPathComponent("Source")
         guard FileManager.default.fileExists(atPath:source.path) else { status="Bundled source is missing";return }
         busy=true;status="Local Qwen is preparing the update…";log="";runPath="";candidatePath=""
-        UserDefaults.standard.removeObject(forKey:"WorkDeskUpdateCandidate")
+        UserDefaults.standard.removeObject(forKey:"MaviUpdateCandidate")
         let p=Process();let pipe=Pipe();p.executableURL=URL(fileURLWithPath:"/usr/bin/python3");p.arguments=[script.path,source.path,prompt];p.standardOutput=pipe;p.standardError=FileHandle.nullDevice
         do { var environment=ProcessInfo.processInfo.environment;environment["MAVI_CODER_MODEL"]=model;p.environment=environment
         try p.run();process=p } catch { busy=false;status=error.localizedDescription;return }
@@ -74,7 +74,7 @@ import AppKit
                 let helper=URL(fileURLWithPath:ticket).deletingLastPathComponent().appendingPathComponent("CommitInstaller.py")
                 try Data(contentsOf:script).write(to:helper,options:.atomic)
                 let commit=Process();commit.executableURL=URL(fileURLWithPath:"/usr/bin/python3");commit.arguments=[helper.path,"commit",ticket];commit.standardInput=FileHandle.nullDevice;commit.standardOutput=FileHandle.nullDevice;commit.standardError=FileHandle.nullDevice
-                try commit.run();UserDefaults.standard.removeObject(forKey:"WorkDeskUpdateCandidate");NSApp.terminate(nil)
+                try commit.run();UserDefaults.standard.removeObject(forKey:"MaviUpdateCandidate");NSApp.terminate(nil)
             } catch { status="Failed: "+error.localizedDescription;busy=false;process=nil }
         }
     }

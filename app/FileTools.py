@@ -76,8 +76,8 @@ def write(req):
             # A bundled ReportLab font avoids depending on host fonts.
             import reportlab
             font=Path(reportlab.__file__).parent/'fonts'/'Vera.ttf'
-            pdfmetrics.registerFont(TTFont('WorkDesk',str(font)))
-            for style in styles.byName.values(): style.fontName='WorkDesk'
+            pdfmetrics.registerFont(TTFont('Mavi',str(font)))
+            for style in styles.byName.values(): style.fontName='Mavi'
             parts=[]
             for line in content.splitlines():
                 heading=line.startswith('# ')

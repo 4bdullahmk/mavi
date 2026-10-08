@@ -18,6 +18,12 @@ For Canvas, Pearson, McGraw Hill, SmartBook, and class assignment requests, Mavi
 
 On Apple Silicon, the Mac desktop workspace can detect and reuse a compatible local MLX-Gen runtime and complete official Qwen Image generation/edit checkpoints. It runs offline, checks available unified memory before model loading, and does not install the runtime or download weights automatically. Mac image quality and performance have not been verified for this release. On Windows, image generation and editing use separate optional official model downloads and a compatible NVIDIA/CUDA setup; 32 GB of system RAM alone does not guarantee support. See [Mac setup](README-Mac.md) and [Windows image requirements](WINDOWS.md#image-generation-and-editing).
 
+## Optional hybrid model routing
+
+Local-only inference remains the default. In Settings, you can opt into Hybrid routing, acknowledge the data disclosure, choose routes for chat, analysis, code, or file tasks, and provide your own key for NVIDIA NIM, OpenRouter, Groq, or Google AI. A local OpenAI-compatible gateway is also supported at an explicit `http://localhost:<port>/v1` or `http://127.0.0.1:<port>/v1` URL. Keys are held in memory for the current run only; re-enter them after restart. Saved route choices do not contain keys.
+
+When Hybrid is enabled, the current task text, conversation context, saved preference profile, and attached text excerpts may be sent to the selected provider. Screenshots, images, and computer-control requests remain local. Mavi uses configured route order and bounded fallback; provider limits, data handling, and charges are controlled by the provider and cannot be guaranteed by Mavi. OpenRouter routes must use a model ID ending in `:free`; paid use is not enabled in this UI. Online routing, provider keys, and billing behavior have not been live-tested in this release.
+
 ## Windows setup
 
 For a one-prompt setup by Codex, follow [Install Mavi with Codex](INSTALL_WITH_CODEX.md). The public source repository is [github.com/4bdullahmk/mavi](https://github.com/4bdullahmk/mavi). Its official `Install-Mavi.cmd` / `Install-Mavi.ps1` path sets up the local runtime; the app itself remains on loopback at `http://127.0.0.1:8769`. All chats, preferences, Discord IDs, and generated files stay in the recipient's `%LOCALAPPDATA%\Mavi` data folder, outside the release source.

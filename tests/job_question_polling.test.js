@@ -105,11 +105,18 @@ appSource = appSource.replace(startup, `  window.__jobQuestionTest = {
     const dispatchResult = await dispatchPage.evaluate(async () => {
       let chatRequests = 0;
       let chatPayload = null;
-      window.fetch = async (_url, options) => {
-        chatRequests += 1;
-        chatPayload = JSON.parse(options.body);
-        await new Promise((resolve) => setTimeout(resolve, 75));
-        return new Response(JSON.stringify({ job_id: "job-send-once", chat_id: "chat-test" }), {
+      window.fetch = async (url, options = {}) => {
+        const path = new URL(url, window.location.href).pathname;
+        if (path.endsWith("/chat")) {
+          chatRequests += 1;
+          chatPayload = JSON.parse(options.body);
+          await new Promise((resolve) => setTimeout(resolve, 75));
+          return new Response(JSON.stringify({ job_id: "job-send-once", chat_id: "chat-test" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          });
+        }
+        return new Response(JSON.stringify({ config: { mode: "local", routes: [] }, mode: "local", routes: [], providers: [], allow_paid: false }), {
           status: 200,
           headers: { "Content-Type": "application/json" }
         });
