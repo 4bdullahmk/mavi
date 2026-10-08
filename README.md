@@ -14,7 +14,7 @@ If you choose a model after setup, `py -3 Setup-Models.py chat` downloads the st
 
 ## Personalization
 
-First launch offers a clean start or optional personalization. Copy Mavi's preference-summary prompt into ChatGPT, then paste or import the reviewed text. The prompt asks ChatGPT to use only context it can actually see. Names, credentials and sensitive details are excluded by default. The imported summary is local prompt context, not model training. No training happens automatically. Any optional personal-touch text is configured per user in local settings and is excluded from public source and release files.
+First launch offers a clean start or optional personalization. Copy Mavi's preference-summary prompt into ChatGPT, then paste or import the reviewed text. The prompt asks ChatGPT to use only context it can actually see. Names, credentials and sensitive details are excluded by default. The imported summary is local prompt context, not model training. No training happens automatically. The app includes an intentionally public, UI-only Easter egg on every fresh install; it requires no private setup file and does not use a model or save a chat. Additional custom personal-touch text is configured per user in local settings and excluded from releases.
 
 ## Future updates
 

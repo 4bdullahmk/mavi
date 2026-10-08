@@ -1,5 +1,11 @@
 # Mavi changes
 
+## 2.0.0-preview.3 — built-in surprise
+
+- Included the author-approved fireworks Easter egg in every Windows/web package, ready on first launch without a private configuration file.
+- The animation runs entirely in the app, consumes no model inference, respects reduced-motion settings, and does not create a chat or send a task.
+- Custom personal-touch phrases remain local. Chats, training data, credentials, profiles, and other personal information remain excluded from releases.
+
 ## 2.0.0-preview.2 — setup and task routing candidate
 
 - Added a guided Windows installer, local setup diagnostics, source-only release checks, and a documented update path that preserves each user’s data.

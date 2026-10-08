@@ -1079,11 +1079,16 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     if (!text && !attachments.length) return;
     if (recording) { showToast("Stop the microphone recording before sending."); return; }
     const personalTouch = state?.settings?.personal_touch;
+    // The author explicitly chose to ship this Easter egg in every public package.
+    // It is UI-only: no model call, saved chat, or private setup file is needed.
+    const builtInTouch = { trigger: "I love Abdullah", message: "I love Muzhda" };
     const normalizeTouch = (value) => String(value || "").trim().replace(/[.!…]+$/, "").replace(/\s+/g, " ").toLocaleLowerCase();
-    if (personalTouch?.trigger && personalTouch?.message && normalizeTouch(text) === normalizeTouch(personalTouch.trigger)) {
+    const surprise = [personalTouch, builtInTouch].find((touch) =>
+      touch?.trigger && touch?.message && normalizeTouch(text) === normalizeTouch(touch.trigger));
+    if (surprise) {
       input.value = "";
       resizeComposer();
-      showMaviSurprise(personalTouch.message);
+      showMaviSurprise(surprise.message);
       return;
     }
     const capability = capabilityFor(currentMode);
