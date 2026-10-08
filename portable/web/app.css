@@ -133,9 +133,21 @@ button:disabled { cursor: not-allowed; opacity: .46; }
 .team-toggle[data-state="waiting"] .penguin-state { background: #b3863b; }
 .team-toggle[data-state="done"] .penguin-state { background: var(--green); }
 .composer-wrap { position: relative; }
-.penguin-companion { position: absolute; z-index: 2; right: 0; top: -72px; width: 64px; height: 64px; display: grid; place-items: center; padding: 7px; border: 1px solid var(--line-strong); border-radius: 22px; background: var(--surface); color: var(--text); box-shadow: 0 8px 24px rgba(12,12,10,.12); }
+.penguin-dock { position: fixed; z-index: 10; top: 82px; left: calc(100vw - 82px); width: 64px; height: 64px; touch-action: none; }
+.penguin-companion { position: absolute; inset: 0; z-index: 1; width: 64px; height: 64px; display: grid; place-items: center; padding: 7px; border: 1px solid var(--line-strong); border-radius: 22px; background: var(--surface); color: var(--text); box-shadow: 0 8px 24px rgba(12,12,10,.12); cursor: grab; touch-action: none; user-select: none; }
+.penguin-dock.is-dragging .penguin-companion { cursor: grabbing; }
 .penguin-companion:hover { border-color: color-mix(in srgb, var(--text) 32%, var(--line)); }
 .penguin-companion:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+.penguin-options-toggle { position: absolute; z-index: 3; top: -5px; right: -6px; width: 24px; height: 24px; display: grid; place-items: center; padding: 0 0 5px; border: 1px solid var(--line-strong); border-radius: 50%; background: var(--surface); color: var(--text); box-shadow: 0 3px 9px rgba(12,12,10,.14); font-size: 18px; line-height: 1; }
+.penguin-options-toggle:focus-visible, .penguin-menu button:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.penguin-menu { position: absolute; z-index: 4; top: 0; right: calc(100% + 8px); width: 190px; display: grid; gap: 3px; padding: 6px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); }
+.penguin-dock.menu-opens-right .penguin-menu { right: auto; left: calc(100% + 8px); }
+.penguin-dock.menu-opens-up .penguin-menu { top: auto; bottom: 0; }
+.penguin-menu button { min-height: 34px; padding: 7px 9px; border: 0; border-radius: 8px; background: transparent; color: var(--text); text-align: left; font: inherit; font-size: 11px; }
+.penguin-menu button:hover:not(:disabled) { background: var(--hover); }
+.penguin-menu button:disabled { color: var(--subtle); cursor: not-allowed; }
+.penguin-menu button[aria-checked="true"]::after { content: "✓"; float: right; color: var(--muted); }
+.penguin-dock.animations-off .penguin-companion-art, .penguin-dock.animations-off .penguin-eye, .penguin-dock.animations-off .penguin-companion.is-greeting .penguin-flipper, .penguin-dock.animations-off .penguin-companion.is-greeting .penguin-eye-right { animation: none; }
 .penguin-companion-art { width: 48px; height: 48px; overflow: visible; animation: penguin-idle 3.4s ease-in-out infinite; }
 .penguin-eye { transform-box: fill-box; transform-origin: center; animation: penguin-blink 8s ease-in-out infinite; }
 .penguin-eye-right { animation-delay: .08s; }
@@ -497,7 +509,8 @@ button:disabled { cursor: not-allowed; opacity: .46; }
   .avatar-button { width: 29px; height: 29px; }
   .team-toggle { gap: 5px; width: auto; justify-content: center; padding: 0 7px; font-size: 10px; }
   .team-toggle > span { display: inline; }
-  .penguin-companion { right: 0; top: -67px; width: 58px; height: 58px; padding: 5px; border-radius: 19px; }
+  .penguin-dock { width: 58px; height: 58px; }
+  .penguin-companion { width: 58px; height: 58px; padding: 5px; border-radius: 19px; }
   .penguin-companion-art { width: 44px; height: 44px; }
   .welcome-state { width: calc(100% - 34px); margin-top: 26px; }
   .welcome-state h1 { font-size: 33px; }

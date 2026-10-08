@@ -103,6 +103,16 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
   let showTeam = (() => { try { return localStorage.getItem(showTeamStorageKey) !== "0"; } catch { return true; } })();
   const showPenguinStorageKey = "mavi-show-penguin";
   let showPenguin = (() => { try { return localStorage.getItem(showPenguinStorageKey) !== "0"; } catch { return true; } })();
+  const penguinPositionStorageKey = "mavi-penguin-position";
+  const penguinAnimationStorageKey = "mavi-penguin-animations";
+  let penguinPosition = (() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(penguinPositionStorageKey) || "null");
+      if (Number.isFinite(saved?.x) && Number.isFinite(saved?.y)) return { x: Math.max(0, Math.min(1, saved.x)), y: Math.max(0, Math.min(1, saved.y)) };
+    } catch { /* Use the default floating position. */ }
+    return { x: 0.98, y: 0.1 };
+  })();
+  let penguinAnimations = (() => { try { return localStorage.getItem(penguinAnimationStorageKey) !== "0"; } catch { return true; } })();
   let penguinGreetingTimer = 0;
   let galleryItems = [];
 
@@ -1121,13 +1131,162 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
   function setShowPenguin(visible) {
     showPenguin = Boolean(visible);
     try { localStorage.setItem(showPenguinStorageKey, showPenguin ? "1" : "0"); } catch { /* Keep the preference for this page session. */ }
-    const companion = $("#penguin-companion");
-    companion.classList.toggle("hidden", !showPenguin);
+    const dock = $("#penguin-dock");
+    dock.classList.toggle("hidden", !showPenguin);
     $("#show-penguin-setting").checked = showPenguin;
+    if (showPenguin) applyPenguinPosition(true);
     if (!showPenguin) {
       window.clearTimeout(penguinGreetingTimer);
-      companion.classList.remove("is-greeting");
+      $("#penguin-companion").classList.remove("is-greeting");
+      closePenguinMenu(false);
+      if (dock.contains(document.activeElement)) $("#open-settings").focus({ preventScroll: true });
     }
+  }
+
+  function penguinMotionAllowed() {
+    return penguinAnimations && !window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+  }
+
+  function renderPenguinMotion() {
+    const reduced = Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
+    const allowed = penguinMotionAllowed();
+    $("#penguin-dock").classList.toggle("animations-off", !allowed);
+    const control = $("#penguin-menu-animation");
+    control.setAttribute("aria-checked", String(allowed));
+    control.disabled = reduced;
+    control.textContent = reduced ? "Animation: off (reduced motion)" : `Animation: ${penguinAnimations ? "on" : "off"}`;
+  }
+
+  function setPenguinAnimations(enabled) {
+    penguinAnimations = Boolean(enabled);
+    try { localStorage.setItem(penguinAnimationStorageKey, penguinAnimations ? "1" : "0"); } catch { /* Keep the preference for this page session. */ }
+    renderPenguinMotion();
+  }
+
+  function setPenguinPosition(left, top, persist = false) {
+    const dock = $("#penguin-dock");
+    const maxX = Math.max(0, window.innerWidth - dock.offsetWidth);
+    const maxY = Math.max(0, window.innerHeight - dock.offsetHeight);
+    const x = maxX ? Math.max(0, Math.min(1, left / maxX)) : 0;
+    const y = maxY ? Math.max(0, Math.min(1, top / maxY)) : 0;
+    penguinPosition = { x, y };
+    dock.style.left = `${Math.round(x * maxX)}px`;
+    dock.style.top = `${Math.round(y * maxY)}px`;
+    if (persist) {
+      try { localStorage.setItem(penguinPositionStorageKey, JSON.stringify(penguinPosition)); } catch { /* Keep the position for this page session. */ }
+    }
+  }
+
+  function applyPenguinPosition(persist = false) {
+    const maxX = Math.max(0, window.innerWidth - $("#penguin-dock").offsetWidth);
+    const maxY = Math.max(0, window.innerHeight - $("#penguin-dock").offsetHeight);
+    setPenguinPosition(penguinPosition.x * maxX, penguinPosition.y * maxY, persist);
+  }
+
+  function resetPenguinPosition() {
+    penguinPosition = { x: 0.98, y: 0.1 };
+    applyPenguinPosition(true);
+  }
+
+  function closePenguinMenu(returnFocus = false) {
+    const menu = $("#penguin-menu");
+    if (menu.classList.contains("hidden")) return;
+    menu.classList.add("hidden");
+    $("#penguin-options-toggle").setAttribute("aria-expanded", "false");
+    $("#penguin-dock").classList.remove("menu-opens-right", "menu-opens-up");
+    if (returnFocus) $("#penguin-options-toggle").focus({ preventScroll: true });
+  }
+
+  function openPenguinMenu() {
+    const dock = $("#penguin-dock");
+    const menu = $("#penguin-menu");
+    menu.classList.remove("hidden");
+    const rect = dock.getBoundingClientRect();
+    const opensRight = rect.left < (window.innerWidth - dock.offsetWidth) / 2;
+    const opensUp = rect.top + menu.offsetHeight > window.innerHeight;
+    dock.classList.toggle("menu-opens-right", opensRight);
+    dock.classList.toggle("menu-opens-up", opensUp);
+    $("#penguin-options-toggle").setAttribute("aria-expanded", "true");
+    $("#penguin-menu-say-hi").focus({ preventScroll: true });
+  }
+
+  function greetPenguin() {
+    const companion = $("#penguin-companion");
+    window.clearTimeout(penguinGreetingTimer);
+    companion.classList.remove("is-greeting");
+    void companion.offsetWidth;
+    if (penguinMotionAllowed()) companion.classList.add("is-greeting");
+    penguinGreetingTimer = window.setTimeout(() => companion.classList.remove("is-greeting"), 1100);
+  }
+
+  function wirePenguinControls() {
+    const dock = $("#penguin-dock");
+    const companion = $("#penguin-companion");
+    let pointerDrag = null;
+    let suppressGreetingClick = false;
+    applyPenguinPosition();
+    renderPenguinMotion();
+
+    companion.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      const rect = dock.getBoundingClientRect();
+      pointerDrag = { id: event.pointerId, x: event.clientX, y: event.clientY, left: rect.left, top: rect.top, moved: false };
+      companion.setPointerCapture?.(event.pointerId);
+    });
+    companion.addEventListener("pointermove", (event) => {
+      if (!pointerDrag || pointerDrag.id !== event.pointerId) return;
+      const dx = event.clientX - pointerDrag.x;
+      const dy = event.clientY - pointerDrag.y;
+      if (!pointerDrag.moved && Math.hypot(dx, dy) < 5) return;
+      pointerDrag.moved = true;
+      event.preventDefault();
+      dock.classList.add("is-dragging");
+      setPenguinPosition(pointerDrag.left + dx, pointerDrag.top + dy);
+    });
+    const finishPointer = (event) => {
+      if (!pointerDrag || pointerDrag.id !== event.pointerId) return;
+      if (pointerDrag.moved) {
+        setPenguinPosition(parseFloat(dock.style.left), parseFloat(dock.style.top), true);
+        suppressGreetingClick = true;
+        window.setTimeout(() => { suppressGreetingClick = false; }, 0);
+      }
+      pointerDrag = null;
+      dock.classList.remove("is-dragging");
+    };
+    companion.addEventListener("pointerup", finishPointer);
+    companion.addEventListener("pointercancel", finishPointer);
+    companion.addEventListener("click", (event) => {
+      if (suppressGreetingClick) { event.preventDefault(); return; }
+      greetPenguin();
+    });
+    companion.addEventListener("contextmenu", (event) => { event.preventDefault(); openPenguinMenu(); });
+    $("#penguin-options-toggle").addEventListener("click", () => {
+      if ($("#penguin-menu").classList.contains("hidden")) openPenguinMenu();
+      else closePenguinMenu();
+    });
+    $("#penguin-menu-say-hi").addEventListener("click", () => { closePenguinMenu(true); greetPenguin(); });
+    $("#penguin-menu-animation").addEventListener("click", () => {
+      if (!window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) setPenguinAnimations(!penguinAnimations);
+    });
+    $("#penguin-menu-reset").addEventListener("click", () => { resetPenguinPosition(); closePenguinMenu(true); });
+    $("#penguin-menu-hide").addEventListener("click", () => setShowPenguin(false));
+    document.addEventListener("pointerdown", (event) => { if (!dock.contains(event.target)) closePenguinMenu(false); });
+    document.addEventListener("keydown", (event) => {
+      const menu = $("#penguin-menu");
+      if (menu.classList.contains("hidden")) return;
+      const items = [...menu.querySelectorAll('[role^="menuitem"]:not(:disabled)')];
+      const current = items.indexOf(document.activeElement);
+      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closePenguinMenu(true); }
+      else if (event.key === "Tab") closePenguinMenu(false);
+      else if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
+        event.preventDefault();
+        const index = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : (current + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+        items[index]?.focus({ preventScroll: true });
+      }
+    });
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    reducedMotion?.addEventListener?.("change", renderPenguinMotion);
+    window.addEventListener("resize", () => applyPenguinPosition(true));
   }
 
   function setShowTeam(visible, reveal = false) {
@@ -2014,14 +2173,7 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     $("#team-toggle").addEventListener("click", () => setShowTeam(!showTeam, !showTeam));
     $("#show-team-setting").addEventListener("change", (event) => setShowTeam(event.target.checked));
     $("#show-penguin-setting").addEventListener("change", (event) => setShowPenguin(event.target.checked));
-    $("#penguin-companion").addEventListener("click", (event) => {
-      const companion = event.currentTarget;
-      window.clearTimeout(penguinGreetingTimer);
-      companion.classList.remove("is-greeting");
-      void companion.offsetWidth;
-      companion.classList.add("is-greeting");
-      penguinGreetingTimer = window.setTimeout(() => companion.classList.remove("is-greeting"), 1100);
-    });
+    wirePenguinControls();
     updatePenguinStatus(null);
     setShowPenguin(showPenguin);
     renderAgentMap([...agentEventByID.values()]);

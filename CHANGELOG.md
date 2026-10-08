@@ -1,5 +1,9 @@
 # Mavi changes
 
+## 2.0.1 — floating companion (build 32)
+
+- Add a movable, edge-aware penguin companion outside the chat view with saved visibility and position, keyboard/Escape support, and a reduced-motion-aware animation toggle.
+
 ## 2.0.1 — hybrid model routing (build 31)
 
 - Add opt-in Hybrid routing for selected text-only chat, analysis, code, and file tasks through NVIDIA NIM, OpenRouter, Groq, Google AI, or a user-configured loopback OpenAI-compatible gateway. Local-only inference remains the default.
