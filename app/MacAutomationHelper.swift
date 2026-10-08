@@ -4,6 +4,7 @@ import ScreenCaptureKit
 import ImageIO
 import UniformTypeIdentifiers
 
+@MainActor
 private enum MacAutomation {
     static let apps: [String: String] = [
         "com.brave.Browser": "Brave", "com.google.Chrome": "Google Chrome",

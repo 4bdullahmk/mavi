@@ -10,11 +10,14 @@ struct MaviWebEntry {
     @MainActor
     static func main() {
         if CommandLine.arguments.contains("--mavi-automation") {
+            let application = NSApplication.shared
+            application.setActivationPolicy(.prohibited)
             Task { @MainActor in
                 let status = await runMacAutomationCommand()
                 Darwin.exit(status)
             }
-            dispatchMain()
+            application.run()
+            return
         }
         MaviWebApp.main()
     }
