@@ -1,7 +1,9 @@
-# Optional document/image I/O dependencies. Models and CUDA are installed separately.
+# Document, image I/O, and mesh helpers. Models and CUDA are installed separately.
 Pillow>=11,<13
 pypdf>=5,<7
 reportlab>=4,<5
 python-docx>=1.1,<2
 openpyxl>=3.1,<4
 python-pptx>=1,<2
+numpy>=1.26,<3
+trimesh>=4,<5

@@ -76,7 +76,6 @@ jobs:
       VERSION: ${{ needs.validate_inputs.outputs.version }}
       SOURCE_SHA: ${{ needs.validate_inputs.outputs.source_sha }}
       PRERELEASE: ${{ needs.validate_inputs.outputs.prerelease }}
-      OUTPUT_DIR: ${{ runner.temp }}/mavi-source-release
     steps:
       - name: Check out the exact validated commit
         uses: actions/checkout@v4
@@ -89,9 +88,14 @@ jobs:
       - name: Recheck source hygiene
         run: python scripts/check_release.py
       - name: Create deterministic source ZIP and SHA-256 sidecar
+        env:
+          OUTPUT_DIR: ${{ runner.temp }}/mavi-source-release
         run: python scripts/package_source.py . "$OUTPUT_DIR" "$VERSION"
       - name: Verify checksum and source-only package contents
         shell: bash
+        env:
+          VERSION: ${{ needs.validate_inputs.outputs.version }}
+          OUTPUT_DIR: ${{ runner.temp }}/mavi-source-release
         run: |
           python - <<'PY'
           import hashlib, os, stat, zipfile
@@ -171,8 +175,8 @@ jobs:
         with:
           name: Mavi-Windows-${{ needs.validate_inputs.outputs.version }}
           path: |
-            ${{ env.OUTPUT_DIR }}/Mavi-Windows-${{ needs.validate_inputs.outputs.version }}.zip
-            ${{ env.OUTPUT_DIR }}/Mavi-Windows-${{ needs.validate_inputs.outputs.version }}.zip.sha256
+            ${{ runner.temp }}/mavi-source-release/Mavi-Windows-${{ needs.validate_inputs.outputs.version }}.zip
+            ${{ runner.temp }}/mavi-source-release/Mavi-Windows-${{ needs.validate_inputs.outputs.version }}.zip.sha256
           if-no-files-found: error
           retention-days: 14
       - name: Publish GitHub release assets
@@ -182,7 +186,7 @@ jobs:
           VERSION: ${{ needs.validate_inputs.outputs.version }}
           SOURCE_SHA: ${{ needs.validate_inputs.outputs.source_sha }}
           PRERELEASE: ${{ needs.validate_inputs.outputs.prerelease }}
-          OUTPUT_DIR: ${{ env.OUTPUT_DIR }}
+          OUTPUT_DIR: ${{ runner.temp }}/mavi-source-release
           NOTES_PATH: ${{ runner.temp }}/mavi-source-release-notes.md
         shell: bash
         run: |
