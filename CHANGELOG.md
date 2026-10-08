@@ -1,17 +1,20 @@
 # Mavi changes
 
-## 2.0.0-preview.4 — repeatable celebrations and guided Discord
+## 2.0.0-preview.5 — Mac application routing
 
-- Added a full-window red-heart celebration to native macOS and Windows/web Mavi. It can replay every time the phrase is sent, with Close, Escape, automatic dismissal, and reduced-motion support. It consumes no model inference and creates no conversation.
-- Kept the same repeatable celebration in Windows/web Mavi, including when no chat model is ready; attachments remain in the composer.
+- Route explicit Discord launch requests to the installed macOS application before model planning.
+- Remove unnecessary interface hints and simplify setup screens.
+- Preserve local data, permissions, and the independent Discord connection for each installation.
+
+## 2.0.0-preview.4 — guided Discord setup
+
 - Replaced the Discord settings form with a four-step setup guide, generated bot invite links, ID instructions, input validation, connection status, and clear chat versus local-task permissions. Each installation connects its own bot; tokens remain in memory and must be re-entered after restart.
-- Added native Mac build 16 with the requested red-heart design. Windows hardware and live recipient Discord testing remain pending.
+- Updated native Mac interface rendering and reduced-motion support. Windows hardware and live recipient Discord testing remain pending.
 
-## 2.0.0-preview.3 — built-in surprise
+## 2.0.0-preview.3 — interface polish
 
-- Included the author-approved fireworks Easter egg in every Windows/web package, ready on first launch without a private configuration file.
-- The animation runs entirely in the app, consumes no model inference, respects reduced-motion settings, and does not create a chat or send a task.
-- Custom personal-touch phrases remain local. Chats, training data, credentials, profiles, and other personal information remain excluded from releases.
+- Improved local interface behavior and accessibility support.
+- Chats, training data, credentials, profiles, and other personal information remain excluded from releases.
 
 ## 2.0.0-preview.2 — setup and task routing candidate
 
@@ -22,7 +25,6 @@
 - Added explicit app targeting for supported browsers and meeting apps, with default-browser link opening and window disambiguation.
 - Moved native mode selection inside the composer and softened its layout.
 - Added automatic learning-site guidance for reading instructions, tracking progress, pausing for login, and reviewing consequential submissions. Canvas, Pearson, and McGraw Hill live workflows still need verification.
-- Added optional personal-touch animations configured entirely in the current user’s local settings. Public packages contain no preset personal messages.
 - Target Windows execution, GPU image generation, and desktop-control verification remain pending; this is a development candidate.
 
 ## 2.0.0-preview.1 — public-source development candidate

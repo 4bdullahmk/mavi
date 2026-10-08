@@ -580,8 +580,6 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
   }
 
   function renderSettings() {
-    $("#touch-trigger").value = state?.settings?.personal_touch?.trigger || "";
-    $("#touch-message").value = state?.settings?.personal_touch?.message || "";
     $("#settings-profile").value = String(state?.profile || "").slice(0, maxProfileChars);
     localProfileDraft = $("#settings-profile").value;
     updateProfileCount();
@@ -1593,28 +1591,6 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     $("#clear-history-settings").addEventListener("click", clearHistory);
     $("#settings-profile").addEventListener("input", updateProfileCount);
     $("#save-settings-profile").addEventListener("click", saveSettingsProfile);
-    $("#save-personal-touch").addEventListener("click", async () => {
-      const touch = { trigger: $("#touch-trigger").value, message: $("#touch-message").value };
-      try {
-        await post("/personal-touch", touch);
-        state.settings.personal_touch = touch;
-        showToast("Personal touch saved only in this local workspace.");
-      } catch (error) { showToast(error.message || "Could not save personal touch."); }
-    });
-    $("#import-personal-touch").addEventListener("click", () => $("#touch-file").click());
-    $("#touch-file").addEventListener("change", async (event) => {
-      const file = event.target.files[0];
-      if (!file) return;
-      try {
-        if (file.size > 16000) throw new Error("Choose a small personal-touch JSON file.");
-        const touch = JSON.parse(await file.text());
-        if (typeof touch?.trigger !== "string" || typeof touch?.message !== "string" || touch.trigger.length > 80 || touch.message.length > 80) throw new Error("This file needs trigger and message text, up to 80 characters each.");
-        $("#touch-trigger").value = touch.trigger;
-        $("#touch-message").value = touch.message;
-        showToast("Review the imported text, then save it locally.");
-      } catch (error) { showToast(error.message || "Could not read personal touch."); }
-      event.target.value = "";
-    });
     $("#discord-setup-form").addEventListener("submit", (event) => { event.preventDefault(); saveDiscordSettings(); });
     $("#discord-copy-invite").addEventListener("click", copyDiscordInvite);
     ["#discord-application", "#discord-channel", "#discord-users", "#discord-enabled", "#discord-allow-tasks"].forEach((selector) => {

@@ -552,7 +552,7 @@ struct UnifiedAnswer: Error { let text: String }
     }
     static func isDiscordStatusRequest(_ text: String) -> Bool {
         let lower = text.lowercased()
-        guard lower.contains("discord") else { return false }
+        guard lower.contains("discord"), explicitAppTarget(text) == nil else { return false }
         if ["connection", "connected", "status", "check", "working", "healthy"].contains(where: lower.contains) { return true }
         return lower.contains("good") && lower.contains("discord") && lower.contains("connection")
     }
@@ -568,6 +568,7 @@ struct UnifiedAnswer: Error { let text: String }
         let isWebexMeetingRequest = words.contains("webex") && words.contains("meeting") && (words.contains("work") || words.contains("open") || words.contains("join"))
         guard launchPrefixes.contains(where: lower.hasPrefix) || isWebexMeetingRequest else { return [] }
         var targets: [(name: String, bundleID: String)] = []
+        if words.contains("discord") { targets.append(("Discord", "com.hnc.Discord")) }
         if words.contains("webex") { targets.append(("Webex", "Cisco-Systems.Spark")) }
         if words.contains("brave") { targets.append(("Brave", "com.brave.Browser")) }
         if words.contains("chrome") { targets.append(("Chrome", "com.google.Chrome")) }

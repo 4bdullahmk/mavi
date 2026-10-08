@@ -538,7 +538,6 @@ enum Keyboard {
     func reset() { guard !workInProgress else { return }; persistConversation(); currentConversationID = UUID(); lines = []; attachments = []; history = []; workRequest = ""; draft = ""; developerProposal = nil; autonomousControl = false; computerScope = "singleApp"; taskOriginBundleID = nil; activities = []; lastRoute = "Ready for your next request" }
     func showEasterEgg() {
         easterEggID = UUID()
-        if !workInProgress { status = "Built-in celebration · no model or tools used" }
     }
     func send() {
         let text = draft.trimmingCharacters(in:.whitespacesAndNewlines)
