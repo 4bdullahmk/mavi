@@ -70,7 +70,7 @@ def _validate_members(infos: list[zipfile.ZipInfo], *, max_entries: int, max_fil
     directories: set[tuple[str, ...]] = set()
     total = 0
     for info in infos:
-        parts, is_dir = _safe_member_name(info.filename)
+        parts, is_dir = _safe_member_name(info.orig_filename)
         key = tuple(part.casefold() for part in parts)
         if key in seen:
             raise ValueError('The ZIP contains duplicate paths.')
@@ -110,7 +110,7 @@ def extract_archive(zf: zipfile.ZipFile, target: Path, *, max_entries: int = MAX
     root = target.resolve(strict=True)
     written = 0
     for info in infos:
-        parts, is_dir = _safe_member_name(info.filename)
+        parts, is_dir = _safe_member_name(info.orig_filename)
         destination = target.joinpath(*parts)
         if not destination.resolve(strict=False).is_relative_to(root):
             raise ValueError('The ZIP contains a path outside its release folder.')

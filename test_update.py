@@ -23,6 +23,9 @@ class UpdateArchiveTests(unittest.TestCase):
         with zipfile.ZipFile(path, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
             for name, data, mode in entries:
                 info = zipfile.ZipInfo(name)
+                # Preserve deliberately hostile ZIP names on Windows too.
+                info.filename = name
+                info.orig_filename = name
                 if mode is not None:
                     info.external_attr = mode << 16
                 archive.writestr(info, data)
