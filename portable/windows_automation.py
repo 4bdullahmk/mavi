@@ -633,7 +633,7 @@ def _switch_app_target(app: str, window_api, context: dict[str, Any]):
     if _automation_scope(context) != "whole_computer":
         raise RuntimeError("This task is limited to one app. Start a new task and choose approved app switches to work across apps.")
     if app not in APP_TARGETS:
-        raise ValueError("Mavi can switch only to Brave, Chrome, Edge, Firefox, or Webex.")
+        raise ValueError("Mavi can switch only to a supported browser, Webex, File Explorer, Notepad, Word, or Excel.")
     if not _confirmed(context, f"Switch to {app.title()} and let Mavi read its verified app window for this task? This app switch always needs your approval."):
         raise RuntimeError("App switch declined. The current window remains selected.")
     unique_target = _prepare_app_target(window_api, app, context)

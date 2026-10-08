@@ -208,8 +208,9 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
   function renderModelStatus() {
     const models = Array.isArray(state?.models) ? state.models : [];
     const ready = capabilityFor(currentMode).available && !(activeJob && !["chat", "browser", "computer"].includes(activeJob.mode));
+    const surpriseReady = isLocalSurpriseRequest($("#composer-input")?.value || "");
     renderAutomationApprovalControls();
-    $("#send-button").disabled = !ready || Boolean(recording);
+    $("#send-button").disabled = (!ready && !surpriseReady) || Boolean(recording);
     const recordButton = $("#record-button");
     const dictation = capabilityFor("dictation");
     recordButton.disabled = !recording && (!dictation.available || Boolean(activeJob));
@@ -283,6 +284,18 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     $("#hardware-note").textContent = bits.length ? `Detected device: ${bits.join(" · ")}. ${recommendation} Workspace readiness comes from backend capability checks.` : `Device details are not reported. ${recommendation} Readiness comes from the local backend capability checks.`;
   }
 
+  function normalizedTouchText(value) {
+    return String(value || "").trim().replace(/[.!…]+$/, "").replace(/\s+/g, " ").toLocaleLowerCase();
+  }
+
+  function isLocalSurpriseRequest(text) {
+    const personalTouch = state?.settings?.personal_touch;
+    const builtInTouch = { trigger: "I love Abdullah", message: "I love Muzhda" };
+    const normalized = normalizedTouchText(text);
+    return Boolean(normalized && [personalTouch, builtInTouch].some((touch) =>
+      touch?.trigger && touch?.message && normalized === normalizedTouchText(touch.trigger)));
+  }
+
   function renderAutomationApprovalControls() {
     const fieldset = $("#automation-approval");
     const scopeFieldset = $("#automation-scope");
@@ -337,17 +350,28 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
       if (Object.prototype.hasOwnProperty.call(discord, "user_ids") && Array.isArray(discord.user_ids)) $("#discord-users").value = discord.user_ids.filter((id) => typeof id === "string").join(", ");
     }
     updateDiscordInviteLink();
+    updateDiscordSaveLabel();
+  }
+
+  function updateDiscordSaveLabel() {
+    const enabled = $("#discord-enabled").checked;
+    const connected = state?.discord?.enabled === true || state?.discord?.connected === true;
+    $("#save-discord").textContent = enabled
+      ? (connected ? "Save changes" : "Connect Discord")
+      : (connected ? "Disconnect Discord" : "Save setup");
   }
 
   function updateDiscordInviteLink() {
     const link = $("#discord-invite-link");
     if (!link) return;
+    const copyButton = $("#discord-copy-invite");
     const applicationID = $("#discord-application").value.trim();
     if (!/^\d{17,20}$/.test(applicationID)) {
       link.href = "#";
       link.setAttribute("aria-disabled", "true");
       link.setAttribute("tabindex", "-1");
       link.classList.add("disabled-link");
+      if (copyButton) copyButton.disabled = true;
       return;
     }
     const invite = new URL("https://discord.com/oauth2/authorize");
@@ -356,6 +380,7 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     link.removeAttribute("aria-disabled");
     link.removeAttribute("tabindex");
     link.classList.remove("disabled-link");
+    if (copyButton) copyButton.disabled = false;
   }
 
   function stopDiscordStatusPoll() {
@@ -1031,24 +1056,19 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     const dialog = document.createElement("dialog");
     dialog.className = "mavi-surprise";
     dialog.setAttribute("aria-label", displayText);
-    const stars = document.createElement("div");
-    stars.className = "mavi-surprise-stars";
-    stars.setAttribute("aria-hidden", "true");
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (!reduced) {
-      // Bounded one-shot CSS particles: no render loop, sound, or model call.
-      for (let burst = 0; burst < 6; burst += 1) {
-        for (let ray = 0; ray < 14; ray += 1) {
-          const spark = document.createElement("i");
-          const angle = ray * Math.PI * 2 / 14;
-          spark.style.setProperty("--x", `${Math.cos(angle) * 110}px`);
-          spark.style.setProperty("--y", `${Math.sin(angle) * 110}px`);
-          spark.style.setProperty("--delay", `${burst * .7}s`);
-          spark.style.left = `${[20, 78, 40, 85, 13, 64][burst]}%`;
-          spark.style.top = `${[25, 30, 72, 70, 63, 18][burst]}%`;
-          stars.append(spark);
-        }
-      }
+    const hearts = document.createElement("div");
+    hearts.className = "mavi-surprise-hearts";
+    hearts.setAttribute("aria-hidden", "true");
+    // Bounded, one-shot CSS animation; no render loop, sound, or model call.
+    // Keep the hearts visible without movement when reduced motion is enabled.
+    for (let index = 0; index < 108; index += 1) {
+      const heart = document.createElement("span");
+      heart.textContent = "♥";
+      heart.style.setProperty("--delay", `${(index % 6) * .045}s`);
+      heart.style.setProperty("--tilt", `${(index * 19) % 31 - 15}deg`);
+      heart.style.setProperty("--scale", `${.8 + (index % 5) * .12}`);
+      heart.style.setProperty("--alpha", `${.6 + (index % 4) * .1}`);
+      hearts.append(heart);
     }
     const message = document.createElement("div");
     message.className = "mavi-surprise-message";
@@ -1060,7 +1080,7 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     close.className = "quiet-button";
     close.textContent = "Close";
     message.append(overline, title, close);
-    dialog.append(stars, message);
+    dialog.append(hearts, message);
     document.body.append(dialog);
     const dismiss = () => dialog.close();
     const timer = window.setTimeout(dismiss, 8500);
@@ -1078,16 +1098,16 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     const text = input.value.trim();
     if (!text && !attachments.length) return;
     if (recording) { showToast("Stop the microphone recording before sending."); return; }
-    const personalTouch = state?.settings?.personal_touch;
     // The author explicitly chose to ship this Easter egg in every public package.
     // It is UI-only: no model call, saved chat, or private setup file is needed.
+    const personalTouch = state?.settings?.personal_touch;
     const builtInTouch = { trigger: "I love Abdullah", message: "I love Muzhda" };
-    const normalizeTouch = (value) => String(value || "").trim().replace(/[.!…]+$/, "").replace(/\s+/g, " ").toLocaleLowerCase();
     const surprise = [personalTouch, builtInTouch].find((touch) =>
-      touch?.trigger && touch?.message && normalizeTouch(text) === normalizeTouch(touch.trigger));
+      touch?.trigger && touch?.message && normalizedTouchText(text) === normalizedTouchText(touch.trigger));
     if (surprise) {
       input.value = "";
       resizeComposer();
+      renderModelStatus();
       showMaviSurprise(surprise.message);
       return;
     }
@@ -1242,23 +1262,79 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
   }
 
   async function saveDiscordSettings() {
-    stopDiscordStatusPoll();
-    const token = $("#discord-token").value.trim();
+    const tokenField = $("#discord-token");
+    const feedback = $("#discord-setup-feedback");
+    const fail = (message, selector) => {
+      feedback.textContent = message;
+      feedback.classList.add("is-error");
+      $(selector)?.focus();
+    };
     const channelID = $("#discord-channel").value.trim();
-    const users = $("#discord-users").value.split(",").map((item) => item.trim()).filter(Boolean);
+    const users = $("#discord-users").value.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean);
     const applicationID = $("#discord-application").value.trim();
-    const payload = { application_id: applicationID, channel_id: channelID, user_ids: users, enabled: $("#discord-enabled").checked, allow_tasks: $("#discord-allow-tasks").checked };
+    const enabled = $("#discord-enabled").checked;
+    const token = tokenField.value.trim();
+    if (applicationID && !/^\d{17,20}$/.test(applicationID)) {
+      fail("That application ID should contain 17–20 digits. You can leave it blank if your bot is already invited.", "#discord-application");
+      return;
+    }
+    if (enabled && !/^\d{17,20}$/.test(channelID)) {
+      fail("Add the 17–20 digit ID for your private Discord channel.", "#discord-channel");
+      return;
+    }
+    if (enabled && (!users.length || users.some((id) => !/^\d{17,20}$/.test(id)))) {
+      fail("Add at least one valid 17–20 digit Discord user ID. Separate multiple IDs with commas or new lines.", "#discord-users");
+      return;
+    }
+    const discord = state?.discord || {};
+    const tokenRequired = enabled && discord.connected !== true && (
+      discord.configured !== true || /enter bot token/i.test(String(discord.status || ""))
+    );
+    if (tokenRequired && !token) {
+      fail("Paste your bot token to connect. Mavi keeps it in memory on this device only.", "#discord-token");
+      return;
+    }
+    const payload = { application_id: applicationID, channel_id: channelID, user_ids: users, enabled, allow_tasks: $("#discord-allow-tasks").checked };
     if (token) payload.token = token;
-    $("#discord-token").value = "";
+    stopDiscordStatusPoll();
+    feedback.classList.remove("is-error");
+    feedback.textContent = "Saving your connection settings…";
+    const saveButton = $("#save-discord");
+    saveButton.disabled = true;
+    saveButton.setAttribute("aria-busy", "true");
+    // Clear as soon as the validated credential is about to be sent locally.
+    tokenField.value = "";
     try {
       await post("/discord", payload);
       discordConfigDirty = false;
       await loadState({ syncJob: false });
       if ($("#discord-enabled").checked) startDiscordStatusPoll();
-      showToast(payload.enabled
-        ? "Discord settings saved. Checking the connection… Re-enter your token after Mavi restarts."
-        : "Connection details saved on this device. Discord access is off.");
-    } catch (error) { showToast(error.message || "Could not save Discord settings."); }
+      feedback.classList.remove("is-error");
+      feedback.textContent = payload.enabled
+        ? "Settings saved. Connecting… Keep Mavi open and your computer awake. You’ll need to enter the token again after a restart."
+        : "Settings saved on this device. Discord is off until you connect it.";
+    } catch (_error) {
+      feedback.classList.add("is-error");
+      feedback.textContent = "Could not connect. Check the token, channel ID, user ID, and internet connection, then enter the token and try again.";
+    } finally {
+      saveButton.disabled = false;
+      saveButton.removeAttribute("aria-busy");
+      if (token) delete payload.token;
+    }
+  }
+
+  async function copyDiscordInvite() {
+    const link = $("#discord-invite-link");
+    const feedback = $("#discord-setup-feedback");
+    if (!link || link.getAttribute("aria-disabled") === "true") return;
+    try {
+      await navigator.clipboard.writeText(link.href);
+      feedback.classList.remove("is-error");
+      feedback.textContent = "Invite link copied. Open it to add your bot to your server.";
+    } catch (_error) {
+      feedback.classList.add("is-error");
+      feedback.textContent = "Could not copy the link. Use Open bot invite instead.";
+    }
   }
 
   function setOnboardingError(message) {
@@ -1502,7 +1578,7 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     $$("[data-theme-choice]").forEach((button) => button.addEventListener("click", () => saveThemeChoice(button.dataset.themeChoice)));
     $("#model-select").addEventListener("change", saveSelectedModel);
     $("#composer-form").addEventListener("submit", (event) => { event.preventDefault(); sendMessage(); });
-    $("#composer-input").addEventListener("input", resizeComposer);
+    $("#composer-input").addEventListener("input", () => { resizeComposer(); renderModelStatus(); });
     $("#composer-input").addEventListener("keydown", (event) => {
       if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); sendMessage(); }
     });
@@ -1511,7 +1587,7 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     $("#record-button").addEventListener("click", () => recording ? stopMicrophoneRecording() : startMicrophoneRecording());
     window.addEventListener("beforeunload", discardRecordingOnExit);
     window.addEventListener("pagehide", discardRecordingOnExit);
-    $$(".suggestion").forEach((button) => button.addEventListener("click", () => { $("#composer-input").value = button.dataset.prompt || ""; resizeComposer(); $("#composer-input").focus(); }));
+    $$(".suggestion").forEach((button) => button.addEventListener("click", () => { $("#composer-input").value = button.dataset.prompt || ""; resizeComposer(); renderModelStatus(); $("#composer-input").focus(); }));
     $("#stop-job").addEventListener("click", stopJob);
     $("#clear-history").addEventListener("click", clearHistory);
     $("#clear-history-settings").addEventListener("click", clearHistory);
@@ -1539,16 +1615,18 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
       } catch (error) { showToast(error.message || "Could not read personal touch."); }
       event.target.value = "";
     });
-    $("#save-discord").addEventListener("click", saveDiscordSettings);
+    $("#discord-setup-form").addEventListener("submit", (event) => { event.preventDefault(); saveDiscordSettings(); });
+    $("#discord-copy-invite").addEventListener("click", copyDiscordInvite);
     ["#discord-application", "#discord-channel", "#discord-users", "#discord-enabled", "#discord-allow-tasks"].forEach((selector) => {
       $(selector).addEventListener("input", () => { discordConfigDirty = true; updateDiscordInviteLink(); });
       $(selector).addEventListener("change", () => { discordConfigDirty = true; updateDiscordInviteLink(); });
     });
     $("#discord-enabled").addEventListener("change", () => {
+      updateDiscordSaveLabel();
       if (!$("#discord-enabled").checked) stopDiscordStatusPoll();
     });
     $("#save-project-path").addEventListener("click", saveProjectPath);
-    $("#discord-open-settings").addEventListener("click", () => { setView("settings"); $("#discord-application").focus(); });
+    $("#discord-open-settings").addEventListener("click", () => setView("settings"));
     $("#discord-open-guide").addEventListener("click", () => setView("discord"));
     $("#connect-discord-onboarding").addEventListener("click", () => finishDiscordOnboarding(true));
     $("#skip-discord-onboarding").addEventListener("click", () => finishDiscordOnboarding(false));
@@ -1582,7 +1660,7 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
       if (!activeChatId && chats.length) activeChatId = chats[0].id;
       renderChats();
       renderCurrentChat();
-      if (!capabilityFor("chat").available) $("#send-button").disabled = true;
+      renderModelStatus();
     }
   }
 

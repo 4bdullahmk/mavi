@@ -195,18 +195,18 @@ button:disabled { cursor: not-allowed; opacity: .46; }
 .progress-track span { width: 0; height: 100%; display: block; border-radius: inherit; background: var(--text); transition: width .25s; }
 #chat-view:not(.hidden) .job-card.image-generating:not(.hidden) .progress-track.is-indeterminate > span { width: 30%; background: linear-gradient(90deg, transparent, var(--muted), transparent); opacity: .62; filter: grayscale(1); animation: image-shimmer 1.8s ease-in-out infinite; }
 @keyframes image-shimmer { from { transform: translateX(-110%); } to { transform: translateX(340%); } }
-.mavi-surprise { width: min(900px, 92vw); height: min(580px, 80vh); max-width: 92vw; padding: 0; border: 1px solid #b9ac8750; border-radius: 30px; overflow: hidden; background: radial-gradient(ellipse at center, #302b24, #151412 70%); color: #faf2de; box-shadow: 0 30px 100px #0009; }
-.mavi-surprise::backdrop { background: #070707a8; backdrop-filter: blur(8px); }
-.mavi-surprise-message { position: relative; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; }
-.mavi-surprise-message p { color: #c5bba7; font-size: 10px; letter-spacing: .22em; }
-.mavi-surprise-message h1 { margin: 15px 0 34px; font-family: Georgia, serif; font-weight: 400; font-size: clamp(32px, 7vw, 76px); letter-spacing: -.035em; animation: mavi-love-arrive 1.6s ease-out both; text-shadow: 0 0 45px #e0c88f55; }
-.mavi-surprise-message button { color: #f6ecd7; border-color: #f6ecd744; }
-.mavi-surprise-stars { position: absolute; inset: 0; pointer-events: none; }
-.mavi-surprise-stars i { position: absolute; width: 4px; height: 4px; border-radius: 50%; background: #ecd09b; box-shadow: 0 0 7px #ecd09b88; opacity: 0; animation: mavi-firework 1.8s ease-out var(--delay) both; }
+.mavi-surprise { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; border-radius: 0; overflow: hidden; background: #200a0f; color: #fff; }
+.mavi-surprise::backdrop { background: #200a0f; }
+.mavi-surprise-message { position: relative; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; background: radial-gradient(ellipse at center, #200a0fdd 0, #200a0f99 20%, transparent 48%); }
+.mavi-surprise-message p { color: #ffd9dd; font-size: 10px; letter-spacing: .22em; text-shadow: 0 2px 6px #200a0f; }
+.mavi-surprise-message h1 { margin: 15px 0 34px; font-family: Georgia, serif; font-weight: 400; font-size: clamp(32px, 7vw, 76px); letter-spacing: -.035em; animation: mavi-love-arrive 1s ease-out both; text-shadow: 0 3px 18px #200a0f; }
+.mavi-surprise-message button { color: #fff; border-color: #ffccd166; background: #200a0fcc; }
+.mavi-surprise-hearts { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-template-rows: repeat(9, minmax(0, 1fr)); align-items: center; justify-items: center; pointer-events: none; }
+.mavi-surprise-hearts span { color: #ef233c; font-family: Arial, sans-serif; font-size: min(10vw, 13vh); font-size: min(10vw, 13dvh); line-height: 1; opacity: var(--alpha); transform: rotate(var(--tilt)) scale(var(--scale)); animation: mavi-heart-arrive .85s cubic-bezier(.2,.8,.3,1) var(--delay) both; }
 @keyframes mavi-love-arrive { from { opacity: 0; transform: translateY(14px) scale(.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
-@keyframes mavi-firework { 0% { opacity: 0; transform: translate(0, 0) scale(.2); } 12% { opacity: .85; } 100% { opacity: 0; transform: translate(var(--x), var(--y)) scale(.3); } }
+@keyframes mavi-heart-arrive { from { opacity: 0; transform: translateY(18px) rotate(var(--tilt)) scale(.15); } to { opacity: var(--alpha); transform: translateY(0) rotate(var(--tilt)) scale(var(--scale)); } }
 @media (prefers-reduced-motion: reduce) {
-  .mavi-surprise-message h1 { animation: none; }
+  .mavi-surprise-message h1, .mavi-surprise-hearts span { animation: none; }
   #chat-view:not(.hidden) .job-card.image-generating:not(.hidden) .progress-track.is-indeterminate > span { animation: none; transform: none; opacity: .35; }
 }
 .job-artifacts { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
@@ -309,6 +309,36 @@ button:disabled { cursor: not-allowed; opacity: .46; }
 .discord-status-card > div { min-width: 0; flex: 1; }
 .discord-status-card strong { font-size: 12px; }
 .discord-status-card p { margin: 4px 0 0; color: var(--muted); font-size: 10px; }
+.discord-connection-value { flex: 0 0 auto; padding: 6px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 10px; }
+.discord-wizard { margin-top: 18px; }
+.discord-step-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; counter-reset: discord-step; }
+.discord-step { padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); counter-increment: discord-step; }
+.discord-step-heading { display: flex; align-items: flex-start; gap: 11px; margin-bottom: 13px; }
+.discord-step-heading > span { display: grid; flex: 0 0 26px; width: 26px; height: 26px; place-items: center; border-radius: 9px; background: var(--surface-soft); color: var(--text); font-size: 11px; font-weight: 650; }
+.discord-step-heading h2 { margin: 0; font-size: 14px; font-weight: 600; }
+.discord-step-heading p { margin: 4px 0 0; color: var(--muted); font-size: 10px; }
+.discord-portal-link { display: inline-block; margin: 0 0 14px 37px; color: var(--text); font-size: 11px; text-underline-offset: 3px; }
+.discord-field { display: grid; gap: 6px; margin-top: 12px; color: var(--muted); font-size: 10px; }
+.discord-field > span, .discord-field small, .discord-field-note { color: var(--muted); font-size: 10px; line-height: 1.55; }
+.discord-field input { width: 100%; min-width: 0; height: 38px; padding: 0 11px; border: 1px solid var(--line); border-radius: 8px; outline: 0; background: var(--surface-soft); color: var(--text); font-size: 11px; }
+.discord-field input:focus { border-color: var(--line-strong); }
+.discord-invite-row { justify-content: flex-start; margin: 10px 0 2px 37px; }
+.discord-invite-row .quiet-button { font-size: 10px; }
+.discord-invite-row button:disabled { opacity: .48; cursor: not-allowed; }
+.discord-id-help { margin: 10px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; color: var(--muted); font-size: 10px; line-height: 1.6; }
+.discord-id-help summary { color: var(--text); cursor: pointer; }
+.discord-id-help p { margin: 8px 0; }
+.discord-id-help a { color: var(--text); text-underline-offset: 3px; }
+.discord-consent { display: flex; align-items: flex-start; gap: 10px; margin-top: 13px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
+.discord-consent input, .discord-task-consent input { margin-top: 2px; accent-color: var(--accent); }
+.discord-consent span { display: grid; gap: 4px; }
+.discord-consent b { font-size: 11px; font-weight: 600; }
+.discord-consent small { color: var(--muted); font-size: 10px; line-height: 1.5; }
+.discord-task-consent { margin-top: 9px; padding: 12px; }
+.discord-feedback { min-height: 18px; margin: 12px 2px 8px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.discord-feedback.is-error { color: var(--red); }
+.discord-submit-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.discord-submit-row [aria-busy="true"] { opacity: .65; cursor: wait; }
 .discord-details { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
 .discord-details > div { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .discord-details span { color: var(--muted); font-size: 10px; }

@@ -59,6 +59,7 @@ struct UnifiedAnswer: Error { let text: String }
         guard let desk, !desk.busy, !isBusy, !isStopping else { return false }
         let request = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !request.isEmpty else { return false }
+        if MaviEasterEgg.matches(request) { desk.showEasterEgg();desk.draft="";return false }
         let captured=UnifiedRequest(text:request,files:Array(files))
         desk.error="";desk.add("You",request + Desk.attachmentText(captured.files))
         begin(captured)
@@ -68,6 +69,7 @@ struct UnifiedAnswer: Error { let text: String }
     @discardableResult func queueFollowUp(_ text:String,files:[DeskAttachment]) -> Bool {
         let request=text.trimmingCharacters(in:.whitespacesAndNewlines)
         guard isBusy,!isStopping,!request.isEmpty else { return false }
+        if MaviEasterEgg.matches(request) { desk?.showEasterEgg();desk?.draft="";return false }
         let captured=UnifiedRequest(text:request,files:Array(files))
         queuedRequests.append(captured);queueCount=queuedRequests.count
         return true
@@ -76,6 +78,7 @@ struct UnifiedAnswer: Error { let text: String }
     @discardableResult func steer(_ text:String,files:[DeskAttachment]) -> Bool {
         let instruction=text.trimmingCharacters(in:.whitespacesAndNewlines)
         guard isBusy,!isStopping,!instruction.isEmpty,let desk,let currentRequest=activeRequest else { return false }
+        if MaviEasterEgg.matches(instruction) { desk.showEasterEgg();desk.draft="";return false }
         let capturedFiles=Array(files)
         if activeKind == "browser",browser?.busy == true {
             let browserInstruction=instruction + (capturedFiles.isEmpty ? "" : "\n\n" + Desk.attachmentText(capturedFiles))

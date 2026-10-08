@@ -1,5 +1,12 @@
 # Mavi changes
 
+## 2.0.0-preview.4 — repeatable celebrations and guided Discord
+
+- Added a full-window red-heart celebration to native macOS and Windows/web Mavi. It can replay every time the phrase is sent, with Close, Escape, automatic dismissal, and reduced-motion support. It consumes no model inference and creates no conversation.
+- Kept the same repeatable celebration in Windows/web Mavi, including when no chat model is ready; attachments remain in the composer.
+- Replaced the Discord settings form with a four-step setup guide, generated bot invite links, ID instructions, input validation, connection status, and clear chat versus local-task permissions. Each installation connects its own bot; tokens remain in memory and must be re-entered after restart.
+- Added native Mac build 16 with the requested red-heart design. Windows hardware and live recipient Discord testing remain pending.
+
 ## 2.0.0-preview.3 — built-in surprise
 
 - Included the author-approved fireworks Easter egg in every Windows/web package, ready on first launch without a private configuration file.

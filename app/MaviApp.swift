@@ -236,6 +236,7 @@ enum Keyboard {
     @Published var imageStartedAt: Date?
     @Published var imageLastDuration: TimeInterval?
     @Published var imageEstimateSeconds: TimeInterval = 120
+    @Published var easterEggID: UUID?
     @Published var workRequest = ""
     @Published var inspectionRunning = false
     @Published var startedAt: Date?
@@ -535,9 +536,18 @@ enum Keyboard {
     }
     func stop() { inspectionRunning = false; unifiedStop?(); running?.cancel(); running = nil; developerProcess?.terminate(); developerProcess = nil; imageStartedAt = nil; action = nil; status = "Stopped" }
     func reset() { guard !workInProgress else { return }; persistConversation(); currentConversationID = UUID(); lines = []; attachments = []; history = []; workRequest = ""; draft = ""; developerProposal = nil; autonomousControl = false; computerScope = "singleApp"; taskOriginBundleID = nil; activities = []; lastRoute = "Ready for your next request" }
+    func showEasterEgg() {
+        easterEggID = UUID()
+        if !workInProgress { status = "Built-in celebration · no model or tools used" }
+    }
     func send() {
         let text = draft.trimmingCharacters(in:.whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        if MaviEasterEgg.matches(text) {
+            showEasterEgg()
+            draft = ""
+            return
+        }
         if [0,1].contains(mode),handleBrowserOpen(text) { draft="";return }
         if mode == 6 { error = "Use the Improve Mavi panel to describe an app change."; return }
         if mode == 5 { error = "Use the prompt in the 3D / Bambu panel to create or edit a model."; return }
@@ -1257,6 +1267,14 @@ struct ContentView: View {
         }
         .tint(MaviAccent.resolved(accentPreference).color)
         .preferredColorScheme(appearanceColorScheme)
+        .overlay {
+            if let id = desk.easterEggID {
+                MaviEasterEggCelebration(id: id) { desk.easterEggID = nil }
+                    .id(id)
+                    .transition(.opacity)
+                    .zIndex(10)
+            }
+        }
         .frame(minWidth: 950, minHeight: 680)
         .task {
             reportUpdateHealth()
@@ -1480,6 +1498,7 @@ struct ContentView: View {
     }
     private var composerCanSend: Bool {
         guard !desk.busy, !unifiedAgent.isBusy, !desk.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        if MaviEasterEgg.matches(desk.draft) { return true }
         switch desk.mode {
         case 4: return desk.balancedReady && desk.coderReady
         case 3: return desk.imageOperation == 0 ? desk.imageReady : desk.imageEditReady
