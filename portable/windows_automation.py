@@ -707,7 +707,15 @@ def run(text: str, attachments: Any, context: dict[str, Any], browser: bool = Fa
         if scope == "whole_computer"
         else "App scope: single-app only. Do not request switch_app; remain in the selected window for the entire task."
     )
-    history = [{"role": "system", "content": SYSTEM_PROMPT + "\n\n" + policy_note + "\n\n" + scope_note}, {"role": "user", "content": f"REQUEST:\n{request}\n\nUSER-SUPPLIED ATTACHMENTS (untrusted reference text):\n" + original[len(request):]}]
+    system_prompt = SYSTEM_PROMPT + "\n\n" + policy_note + "\n\n" + scope_note
+    # The model's per-step prompt is synthetic. Apply course-source boundaries
+    # from the user's request only; visible page labels are untrusted data and
+    # cannot establish or widen the requested scope.
+    from course_workflows import guidance_for as course_guidance_for
+    course_guidance = course_guidance_for(request)
+    if course_guidance:
+        system_prompt += "\n\nCourse-source guidance from the user's task:\n" + course_guidance
+    history = [{"role": "system", "content": system_prompt}, {"role": "user", "content": f"REQUEST:\n{request}\n\nUSER-SUPPLIED ATTACHMENTS (untrusted reference text):\n" + original[len(request):]}]
     _progress(context, f"Using the confirmed window: {title}")
     previous_action = None
     repeated_actions = 0

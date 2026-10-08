@@ -33,17 +33,6 @@ LEARNING_SITE_GUIDANCE = (
     "submission, post, message, settings change, or other consequential action, show the exact draft/action and "
     "wait for explicit approval. Do not claim real-portal testing without evidence."
 )
-_LEARNING_SITE_PATTERN = re.compile(
-    r"\b(canvas|pearson|mcgraw\s*-?\s*hill|my(?:math|lab)|smart\s*book|"
-    r"connect\s+(?:courseware|accounting|course|assignment|homework))\b|"
-    r"\b(course site|learning management system|learning portal)\b",
-    re.I,
-)
-_COURSE_WORKFLOW_SITE = re.compile(r"\b(mcgra?w\s*-?\s*hill|smart\s*book|connect)\b", re.I)
-_COURSE_WORKFLOW_TASK = re.compile(
-    r"\b(accounting|course|assignment|homework|problem|question|practice|chapter|reading|graded|submit|due)\b",
-    re.I,
-)
 _ROLE_PATTERNS = (
     ("router", re.compile(r"\b(route|routing|router|classif(?:y|ication)|intent detection|dispatcher)\b", re.I)),
     ("narration", re.compile(r"\b(narrat(?:e|ion|or)|progress update|status summary|brief status)\b", re.I)),
@@ -84,14 +73,15 @@ def prepare_messages(messages: Sequence[Mapping[str, Any]], role_hint: str | Non
         raise ValueError("Each model message must be an object.")
     result = [dict(message) for message in messages]
     role = classify_role(result, role_hint)
-    user_text = "\n".join(str(message.get("content", "")) for message in result
-                           if message.get("role") == "user")
+    user_texts = [str(message.get("content", "")) for message in result
+                  if message.get("role") == "user"]
+    user_text = user_texts[-1] if user_texts else ""
     suffix = INITIATIVE_SUFFIX
-    if _LEARNING_SITE_PATTERN.search(user_text):
+    from course_workflows import guidance_for, is_course_context, is_course_follow_up
+    prior_user_texts = user_texts[-5:-1]
+    if is_course_context(user_text) or is_course_follow_up(user_text, prior_user_texts):
         suffix += LEARNING_SITE_GUIDANCE
-        if _COURSE_WORKFLOW_SITE.search(user_text) and _COURSE_WORKFLOW_TASK.search(user_text):
-            from course_workflows import guidance_for
-            suffix += guidance_for(user_text)
+        suffix += guidance_for(user_text, prior_user_texts)
     system_index = next((i for i, message in enumerate(result) if message.get("role") == "system"), None)
     if system_index is None:
         result.insert(0, {"role": "system", "content": suffix})

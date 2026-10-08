@@ -123,6 +123,23 @@ class WindowsAutomationActionTests(unittest.TestCase):
         ask_focus.assert_not_called()
         self.assertEqual(context["ask"].call_count, 1)
 
+    def test_course_materials_policy_reaches_synthetic_window_turn(self):
+        window = FakeWindow()
+        window.title = "Canvas assignment"
+        seen = []
+        context = {"ask": Mock(return_value="yes"),
+                   "call_model": lambda messages, **_kwargs: seen.append(messages) or '{"action":"done","text":"Need the assigned reading."}'}
+        with patch.object(automation, "_deps", return_value=(self.gui, self.window_api, object())), \
+                patch.object(automation, "_prepare_app_target", return_value=True), \
+                patch.object(automation, "_target_window", return_value=(window, window.title)), \
+                patch.object(automation, "_focus_grace"), \
+                patch.object(automation, "_screenshot", return_value="screen"), \
+                patch.object(automation, "_active_matches", return_value=True):
+            automation.run("Open Brave and help with my Canvas assignment from the lecture slides.", None, context)
+        system = seen[0][0]["content"]
+        self.assertIn("only on materials the user supplies", system)
+        self.assertIn("Do not fill gaps with web searches", system)
+
     def test_ambiguous_explicit_app_still_confirms_selected_window(self):
         window = FakeWindow()
         window.title = "Brave Browser"

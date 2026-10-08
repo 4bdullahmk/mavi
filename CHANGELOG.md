@@ -4,7 +4,7 @@
 
 - Route explicit browser targets and URLs to the requested browser, and return to the active control flow when a permission request is declined or needs follow-up.
 - Require the local model's structured action response to match the action schema, clarify the approval prompt, and guard message sending until the pending question is answered.
-- Add conditional guidance for McGraw Hill Connect accounting and SmartBook study tasks. It supports hints and calculation checks, preserves entered work, and pauses before graded submissions; it does not train the model or include course answers.
+- Restrict course assignment help across Canvas, Pearson, McGraw Hill, and SmartBook to user-supplied or assigned materials, with visible-source citations, missing-material questions, and review before graded submissions. This is prompt guidance, not training; it does not add course answers.
 - Use bounded accessibility targets to identify visible links and buttons for reviewed computer actions.
 - Convert accessibility target coordinates correctly across displays and inspect a bounded depth for nested course-page controls.
 - Keep accessibility target labels and action history compact, and display a redacted local error when a request is rejected.
@@ -12,6 +12,7 @@
 - Save the user's approval preference per course workflow and keep an in-flight response intact while status updates arrive.
 - Initialize the macOS automation helper on the main application run loop to avoid a capture-time crash.
 - Verify read-only Brave window capture with Screen Recording and Accessibility permissions enabled. Windows execution and hardware qualification remain pending.
+- Build 27 adds course-source guidance to Mac and Windows computer-control prompts, including synthetic step-by-step controller calls.
 
 ## 2.0.0 — desktop web workspace and task continuation
 

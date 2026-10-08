@@ -12,7 +12,7 @@ For browser tasks, specify the site and goal, for example: “Go into Canvas and
 
 ## Course workflow guidance
 
-For McGraw Hill Connect accounting and SmartBook study requests, Mavi adds local prompt guidance to read the assignment requirements, check units and calculations, preserve entered work, and pause for review before a graded submission. This is guidance only: it does not fine-tune the model or include course answers. Synthetic tests cover the policy routing; live Connect or SmartBook assignment completion has not been verified.
+For Canvas, Pearson, McGraw Hill, SmartBook, and class assignment requests, Mavi adds guidance to use only materials you supply or the course assigns. It asks for missing materials instead of filling gaps with web searches or general knowledge, cites visible chapter/page/slide details without inventing them, distinguishes source facts from derived calculations, and pauses for review before graded submission. You can explicitly broaden the source scope. This is prompt guidance, not model training. Synthetic tests cover the policy; live course assignment completion has not been verified.
 
 ## Windows setup
 

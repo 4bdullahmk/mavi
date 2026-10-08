@@ -132,7 +132,7 @@ class ProposalReviewTests(unittest.TestCase):
             (project / "README.md").write_text("Mavi project evidence: use local setup.\n", encoding="utf-8")
             context = {"project_path": str(project), "model": "qwen3:8b", "call_model": call_model, "agent_event": events.append}
             with patch.object(tools_runtime, "_ollama_models", return_value=["qwen3:8b", "qwen3-coder:30b", "qwen3:4b"]), \
-                 patch.object(tools_runtime, "_ollama_model_sizes", return_value={"qwen3:8b": 1024**3, "qwen3-coder:30b": 1024**3}), \
+                 patch.object(tools_runtime, "_ollama_model_sizes", return_value={"qwen3:8b": 1024**3, "qwen3-coder:30b": 2 * 1024**3}), \
                  patch.object(tools_runtime, "_ollama_running_models", return_value={}), \
                  patch.object(tools_runtime, "_available_system_ram_bytes", return_value=32 * 1024**3):
                 result_one = tools_runtime._worker_fleet("Summarize this project", [], context)
@@ -141,6 +141,7 @@ class ProposalReviewTests(unittest.TestCase):
         self.assertIn("Read-cache hits: 0", result_one)
         self.assertIn("Read-cache hits: 1", result_two)
         self.assertEqual({model for model, _ in calls}, {"qwen3:8b", "qwen3-coder:30b"})
+        self.assertIn("lead synthesizer qwen3-coder:30b", result_one)
         final_nodes = {}
         for event in events:
             self.assertLessEqual(len(event["summary"]), 280)
@@ -149,6 +150,12 @@ class ProposalReviewTests(unittest.TestCase):
         self.assertEqual(len(final_nodes), 8)
         self.assertTrue(any(node["parent_id"] is None and node["status"] == "completed" for node in final_nodes.values()))
         self.assertTrue(any(node["name"] == "Evidence analyst" and node["status"] == "completed" for node in final_nodes.values()))
+        self.assertTrue(any(node["name"] == "Lead synthesizer" and node["model"] == "qwen3-coder:30b" for node in final_nodes.values()))
+
+    def test_worker_lead_uses_largest_selected_model_with_preference_as_tiebreaker(self):
+        models = ["qwen3:8b", "qwen3-coder:30b"]
+        self.assertEqual(tools_runtime._fleet_lead_model(models, {models[0]: 1, models[1]: 2}, models[0]), models[1])
+        self.assertEqual(tools_runtime._fleet_lead_model(models, {models[0]: 2, models[1]: 2}, models[1]), models[1])
 
     def test_worker_fleet_cancellation_marks_agents_stopped(self):
         cancelled = threading.Event()

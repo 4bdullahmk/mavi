@@ -145,7 +145,8 @@ private enum MacAutomation {
         return sameFrame(frame, window.frame)
     }
 
-    private static let actionableRoles: Set<String> = ["AXLink", "AXButton", "AXMenuItem"]
+    private static let selectableRoles: Set<String> = ["AXCheckBox", "AXRadioButton"]
+    private static let actionableRoles: Set<String> = ["AXLink", "AXButton", "AXMenuItem", "AXCheckBox", "AXRadioButton"]
 
     private static func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
         var value: CFTypeRef?
@@ -174,19 +175,37 @@ private enum MacAutomation {
         return matches.count == 1 ? matches[0] : nil
     }
 
+    private static func selectionState(_ element: AXUIElement) -> Bool? {
+        guard let value = attribute(element, kAXValueAttribute as String),
+              let number = value as? NSNumber else { return nil }
+        if number.intValue == 0 { return false }
+        if number.intValue == 1 { return true }
+        return nil
+    }
+
     private static func elementLabel(_ element: AXUIElement) -> String? {
+        var label: String?
         for key in [kAXTitleAttribute as String, kAXDescriptionAttribute as String, kAXHelpAttribute as String] {
             if let value = stringAttribute(element, key), !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return String(value.trimmingCharacters(in: .whitespacesAndNewlines).prefix(180))
+                label = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                break
             }
         }
-        // AXValue is read only from static text nodes. Editable and secure fields are never queried.
-        for child in childElements(element).prefix(80) where role(child) == (kAXStaticTextRole as String) {
-            if let value = stringAttribute(child, kAXValueAttribute as String), !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return String(value.trimmingCharacters(in: .whitespacesAndNewlines).prefix(180))
+        // Text labels read AXValue only from static text nodes; editable and secure fields are never queried.
+        if label == nil {
+            for child in childElements(element).prefix(80) where role(child) == (kAXStaticTextRole as String) {
+                if let value = stringAttribute(child, kAXValueAttribute as String), !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    label = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                    break
+                }
             }
         }
-        return nil
+        guard let label, !label.isEmpty else { return nil }
+        if let currentRole = role(element), selectableRoles.contains(currentRole) {
+            guard let selected = selectionState(element) else { return nil }
+            return String("Currently \(selected ? "selected" : "unselected"): \(label)".prefix(180))
+        }
+        return String(label.prefix(180))
     }
 
     private static func isVisible(_ rect: CGRect, in window: SCWindow) -> Bool {
@@ -276,6 +295,11 @@ private enum MacAutomation {
         switch kind {
         case "target":
             let (element, rect) = try resolveTarget(action, window: window, bundle: bundle)
+            if let currentRole = role(element), selectableRoles.contains(currentRole) {
+                guard let selected = selectionState(element), !selected else {
+                    throw SafeError("The checkbox or radio button is already selected or its state is unavailable. Refresh the window before choosing it.")
+                }
+            }
             var names: CFArray?
             if AXUIElementCopyActionNames(element, &names) == .success,
                let actions = names as? [String], actions.contains(kAXPressAction as String) {
