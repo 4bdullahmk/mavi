@@ -222,6 +222,7 @@ class ImageRuntimeTests(unittest.TestCase):
         self.assertEqual(result, "Saved locally")
         self.assertEqual(run_mlx.call_args.args[2], "generate")
 
+    @unittest.skipIf(os.name == "nt", "This integration fixture executes a POSIX stand-in for the macOS MLX CLI")
     def test_macos_generation_uses_local_cli_offline_and_saves_into_data(self):
         support = self.root / "Application Support/Mavi"
         data = support / "data"
@@ -258,6 +259,7 @@ class ImageRuntimeTests(unittest.TestCase):
         self.assertEqual(len(list((data / "outputs").glob("mavi-image-*.png"))), 1)
         self.assertTrue(any(message == "Image step 1/28" for message in self.progress))
 
+    @unittest.skipIf(os.name == "nt", "This integration fixture executes a POSIX stand-in for the macOS MLX CLI")
     def test_macos_edit_forwards_only_validated_uploaded_reference_paths(self):
         support = self.root / "Application Support/Mavi"
         data = support / "data"

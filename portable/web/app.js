@@ -938,6 +938,7 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     setView("chat");
     $("#messages").replaceChildren();
     $("#welcome-state").classList.remove("hidden");
+    renderChatContext();
     closeMobileSidebar();
     $("#composer-input").focus();
   }

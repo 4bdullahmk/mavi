@@ -36,6 +36,14 @@ def is_course_platform_question(text: str) -> bool:
     return bool(_COURSE_QUESTION.search(clean) and _COURSE_PLATFORM.search(clean))
 
 
+def is_course_platform_negation(text: str) -> bool:
+    """Treat an explicit refusal to open or use a course site as chat intent."""
+    if not isinstance(text, str):
+        return False
+    clean = _unquoted_user_text(text).strip()
+    return bool(_COURSE_PLATFORM.search(clean) and _COURSE_NEGATION.search(clean))
+
+
 def is_course_platform_request(text: str) -> bool:
     """Recognize explicit user requests to use a course site or supplied HTTPS link."""
     if not isinstance(text, str):

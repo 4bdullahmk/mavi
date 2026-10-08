@@ -12,7 +12,10 @@ const startup = "  start();\n})();";
 assert.equal(appSource.split(startup).length, 2, "expected one app startup hook");
 appSource = appSource.replace(startup, `  window.__jobQuestionTest = {
     renderJobQuestion,
+    renderCurrentChat,
     setView,
+    newChat,
+    selectChat,
     sendMessage,
     selectAutomationPolicy,
     automationPolicy() { return automationPolicyChoice; },
@@ -26,6 +29,15 @@ appSource = appSource.replace(startup, `  window.__jobQuestionTest = {
       currentMode = "chat";
       activeChatId = "chat-test";
       renderModelStatus();
+    },
+    configureSavedContextChat() {
+      state = {
+        chats: [{ id: "chat-context", title: "Brave task", messages: [{ role: "assistant", content: "Saved work" }],
+          app_context: { app: "brave", name: "Brave", task: "Open the local report" } }],
+        models: [], settings: {}, capabilities: { chat: { available: true }, auto: { available: true }, dictation: { available: false } }
+      };
+      activeChatId = "chat-context";
+      renderCurrentChat();
     }
   };\n})();`);
 
@@ -139,19 +151,30 @@ appSource = appSource.replace(startup, `  window.__jobQuestionTest = {
       window.__jobQuestionTest.configureChat();
       document.querySelector("#composer-input").value = "Please run one task";
       await Promise.all([window.__jobQuestionTest.sendMessage(), window.__jobQuestionTest.sendMessage()]);
+      window.__jobQuestionTest.configureSavedContextChat();
+      const contextBeforeNewChat = !document.querySelector("#chat-context-banner").classList.contains("hidden");
+      window.__jobQuestionTest.newChat();
+      const contextAfterNewChat = !document.querySelector("#chat-context-banner").classList.contains("hidden");
+      const newChatHasNoActiveID = localStorage.getItem("mavi-active-chat") === "__new__";
+      window.__jobQuestionTest.selectChat("chat-context");
+      const contextAfterReopen = !document.querySelector("#chat-context-banner").classList.contains("hidden");
+      const preservedContext = document.querySelector("#chat-context-name").textContent;
       return {
         chatRequests,
         activeJobID: document.querySelector("#job-card").classList.contains("hidden") ? null : "job-started",
         savedOnLoad, controlRestored, changedPreferenceSaved, restoredAfterHide,
         settingsFocus, discordFocus, settingsFocusable, discordFocusable,
-        requestPolicy: chatPayload?.automation_policy
+        requestPolicy: chatPayload?.automation_policy,
+        contextBeforeNewChat, contextAfterNewChat, newChatHasNoActiveID, contextAfterReopen, preservedContext
       };
     });
     assert.deepEqual(dispatchResult, {
       chatRequests: 1, activeJobID: "job-started", savedOnLoad: "routine_navigation",
       controlRestored: "routine_navigation", changedPreferenceSaved: "ask_each",
       restoredAfterHide: "ask_each", settingsFocus: "settings-view", discordFocus: "discord-view",
-      settingsFocusable: "-1", discordFocusable: "-1", requestPolicy: "routine_navigation"
+      settingsFocusable: "-1", discordFocusable: "-1", requestPolicy: "routine_navigation",
+      contextBeforeNewChat: true, contextAfterNewChat: false, newChatHasNoActiveID: true,
+      contextAfterReopen: true, preservedContext: "Brave"
     });
     await dispatchPage.close();
   } finally {

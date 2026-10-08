@@ -1,5 +1,11 @@
 # Mavi changes
 
+## 2.0.1 — New chat context and route guard (build 33)
+
+- Clear the previous chat's browser-context banner when New chat is selected, while keeping context attached to chats reopened from history.
+- Keep an explicitly negated course-site request in chat without invoking the automatic workspace router.
+- Run macOS MLX command fixtures only on POSIX test runners; Windows CI does not attempt to execute a POSIX shell stub as a Windows binary.
+
 ## 2.0.1 — floating companion (build 32)
 
 - Add a movable, edge-aware penguin companion outside the chat view with saved visibility and position, keyboard/Escape support, and a reduced-motion-aware animation toggle.

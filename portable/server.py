@@ -8,7 +8,8 @@ from model_policy import prepare_messages, strip_thinking, ThinkingFilter
 from online_models import OnlineRouter, OnlineUnavailable, OnlineModelError
 from app_context import (clean_app_context, is_app_followup, is_permission_recovery,
                          is_permission_recovery_phrase, is_course_platform_question,
-                         is_course_platform_request, is_saved_course_platform_followup)
+                         is_course_platform_negation, is_course_platform_request,
+                         is_saved_course_platform_followup)
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_DATA = Path(os.environ.get('LOCALAPPDATA', Path.home() / '.local/share')) / 'Mavi'
@@ -335,7 +336,7 @@ def route_task(text, attachments, job):
     # Course websites are not installed-app names; resolve a clear user request
     # deterministically so unfamiliar portals reach the normal browser flow.
     # Prefer a browser already selected for this course chat, if one is saved.
-    if is_course_platform_question(text): return 'chat'
+    if is_course_platform_question(text) or is_course_platform_negation(text): return 'chat'
     if is_saved_course_platform_followup(text, job.get('_app_context')): return 'computer'
     if is_course_platform_request(text): return 'browser'
     if attachments and all(x['name'].lower().endswith('.wav') for x in attachments): return 'dictation'
