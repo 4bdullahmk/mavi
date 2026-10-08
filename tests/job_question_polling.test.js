@@ -12,6 +12,7 @@ const startup = "  start();\n})();";
 assert.equal(appSource.split(startup).length, 2, "expected one app startup hook");
 appSource = appSource.replace(startup, `  window.__jobQuestionTest = {
     renderJobQuestion,
+    setView,
     sendMessage,
     selectAutomationPolicy,
     automationPolicy() { return automationPolicyChoice; },
@@ -114,6 +115,12 @@ appSource = appSource.replace(startup, `  window.__jobQuestionTest = {
         });
       };
       const savedOnLoad = window.__jobQuestionTest.automationPolicy();
+      window.__jobQuestionTest.setView("settings");
+      const settingsFocus = document.activeElement?.id;
+      window.__jobQuestionTest.setView("discord");
+      const discordFocus = document.activeElement?.id;
+      const settingsFocusable = document.querySelector("#settings-view")?.getAttribute("tabindex");
+      const discordFocusable = document.querySelector("#discord-view")?.getAttribute("tabindex");
       window.__jobQuestionTest.configureComputer();
       const controlRestored = document.querySelector("#automation-policy").value;
       window.__jobQuestionTest.selectAutomationPolicy("ask_each");
@@ -129,13 +136,15 @@ appSource = appSource.replace(startup, `  window.__jobQuestionTest = {
         chatRequests,
         activeJobID: document.querySelector("#job-card").classList.contains("hidden") ? null : "job-started",
         savedOnLoad, controlRestored, changedPreferenceSaved, restoredAfterHide,
+        settingsFocus, discordFocus, settingsFocusable, discordFocusable,
         requestPolicy: chatPayload?.automation_policy
       };
     });
     assert.deepEqual(dispatchResult, {
       chatRequests: 1, activeJobID: "job-started", savedOnLoad: "routine_navigation",
       controlRestored: "routine_navigation", changedPreferenceSaved: "ask_each",
-      restoredAfterHide: "ask_each", requestPolicy: "routine_navigation"
+      restoredAfterHide: "ask_each", settingsFocus: "settings-view", discordFocus: "discord-view",
+      settingsFocusable: "-1", discordFocusable: "-1", requestPolicy: "routine_navigation"
     });
     await dispatchPage.close();
   } finally {

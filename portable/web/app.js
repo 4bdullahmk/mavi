@@ -670,7 +670,12 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     $$(".nav-item[data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === name));
     closeWorkspaceMenu();
     if (name === "settings") renderSettings();
+    if (name === "discord") renderDiscord();
     if (name === "gallery") loadGallery();
+    if (name === "settings" || name === "discord") {
+      const section = document.getElementById(name === "settings" ? "settings-view" : "discord-view");
+      section?.focus({ preventScroll: true });
+    }
   }
 
   function renderSettings() {

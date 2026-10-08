@@ -38,7 +38,7 @@ The standalone web client is a separate implementation from the native SwiftUI c
 From the repository root on Apple Silicon with Xcode Command Line Tools installed:
 
 ```sh
-MAVI_VERSION=2.0.1 MAVI_BUILD_NUMBER=29 ./app/build_web_macos.sh
+MAVI_VERSION=2.0.1 MAVI_BUILD_NUMBER=30 ./app/build_web_macos.sh
 ```
 
 The build creates an ad-hoc signed app under a temporary build directory and a versioned ZIP plus SHA-256 sidecar in `app/dist/`. Set `MAVI_SIGN_IDENTITY` to an existing signing identity if you have one. A Developer ID signature and notarization are needed for the standard trusted-download experience.
