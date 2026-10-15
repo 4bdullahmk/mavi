@@ -1,5 +1,13 @@
 # Mavi changes
 
+## 2.0.1 — session and window navigation (build 44)
+
+- In routine navigation, automatically select the matching task window or the requested app’s frontmost window, without asking for an exact title or repeating task consent. Manual window choices also accept an ID or distinctive title fragment.
+- Retry an invalid model target against fresh accessibility observations before stopping; no invalid click is executed.
+- For explicitly requested browser login, permit observed sign-in and saved-login controls under routine navigation. Keep credentials inside the browser and pause for manual authentication challenges.
+- Recognize an already signed-in Canvas dashboard from its title and course links, and continue the requested task without reopening login.
+- Preserve screenshots-off Mac operation and review for unrelated data changes.
+
 ## 2.0.1 — accessibility computer control (build 42)
 
 - Use a local text model and visible accessibility controls for Mac computer and Brave research tasks without capturing or sending screenshots.

@@ -14,6 +14,67 @@ import app_context
 
 
 class MacAutomationTests(unittest.TestCase):
+    def test_canvas_dashboard_requires_course_link_evidence(self):
+        capture = {"title": "Dashboard - Brave", "targets": [{"role": "AXLink", "url": "https://canvas.example.edu/courses/123"}]}
+        self.assertTrue(mac._canvas_dashboard_session(capture))
+        capture["targets"][0]["url"] = "https://unrelated.example/courses/123"
+        self.assertFalse(mac._canvas_dashboard_session(capture))
+        capture["title"] = "Canvas Login"
+        capture["targets"][0]["url"] = "https://canvas.example.edu/courses/123"
+        self.assertFalse(mac._canvas_dashboard_session(capture))
+
+    def test_window_selection_finds_canvas_without_question(self):
+        context = {"automation_policy": "routine_navigation", "_window_request": "Open Canvas and log in",
+                   "ask": lambda q: self.fail(q)}
+        windows = [{"window_id": 8, "title": "Other website - Brave"},
+                   {"window_id": 7, "title": "Canvas Login - Brave"}]
+        with patch.object(mac, "_call_helper", return_value={"windows": windows}):
+            self.assertEqual(mac._select_window("com.brave.Browser", "Brave", context), 7)
+            context["_window_request"] = "Open Brave"
+            self.assertEqual(mac._select_window("com.brave.Browser", "Brave", context), 8)
+            self.assertEqual(mac._select_window("com.brave.Browser", "Brave", context, 7), 7)
+
+    def test_window_choice_accepts_number_or_distinctive_title(self):
+        windows = [{"window_id": 7, "title": "Canvas Login - Brave"}, {"window_id": 8, "title": "Other - Brave"}]
+        with patch.object(mac, "_call_helper", return_value={"windows": windows}):
+            for answer in ("7", "canvas", "Canvas Login - Brave"):
+                self.assertEqual(mac._select_window("com.brave.Browser", "Brave", {"ask": lambda q: answer}), 7)
+
+    def test_saved_login_controls_do_not_authorize_other_actions(self):
+        for label in ("Log in", "Mason Login", "Sign in with Microsoft", "Use saved password"):
+            action = {"action": "target", "_target": {"role": "AXButton", "label": label}}
+            self.assertTrue(mac._saved_login_navigation(action, "Log into Canvas", True))
+            self.assertFalse(mac._saved_login_navigation(action, "Read a public page", True))
+            self.assertFalse(mac._saved_login_navigation(action, "Do not log in", True))
+        for label in ("Show saved password", "Manage passwords", "Approve sign in", "Create login", "Verify login code"):
+            self.assertFalse(mac._saved_login_navigation({"action": "target", "_target": {"role": "AXButton", "label": label}}, "Log into Canvas", True))
+        self.assertFalse(mac._saved_login_navigation({"action": "type", "text": "secret"}, "Log into Canvas", True))
+
+    def test_invalid_target_recovers_and_saved_login_needs_no_extra_prompt(self):
+        actions, observations = [], []
+        proposals = iter([
+            {"action": "target", "target_id": "9.9", "reason": "log in", "risk": "credential"},
+            {"action": "target", "target_id": "0.3", "reason": "log in using browser session", "risk": "credential"},
+            {"action": "done", "text": "Dashboard is visible."},
+        ])
+        def helper(payload, **kwargs):
+            if payload["op"] == "capability": return {"accessibility": True}
+            if payload["op"] == "windows": return {"windows": [{"window_id": 7, "title": "Canvas Login"}]}
+            if payload["op"] == "observe":
+                observations.append(payload)
+                return {"bundle_id": "com.brave.Browser", "window_id": 7, "title": "Canvas", "text": [],
+                        "targets": [{"id": "0.3", "role": "AXButton", "label": "Log in"}]}
+            if payload["op"] == "action": actions.append(payload["action"])
+            return {}
+        context = {"ask": lambda q: self.fail(q), "no_screenshots": True, "automation_policy": "routine_navigation",
+                   "call_model": lambda *a, **kw: json.dumps(next(proposals))}
+        with patch.object(mac, "_call_helper", side_effect=helper), patch.object(mac, "_settle_after_action"):
+            result = mac.run("Open Brave and log into Canvas using my saved login", [], context, browser=True)
+        self.assertIn("Dashboard", result)
+        self.assertEqual(len(observations), 3)
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0]["target_id"], "0.3")
+
     def test_exact_text_is_verified_without_second_type_action(self):
         actions = []
         observations = iter(["", "Mavi control test"])
