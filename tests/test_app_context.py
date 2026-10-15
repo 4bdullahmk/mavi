@@ -231,7 +231,13 @@ class AppContextTests(unittest.TestCase):
         }
         return job, chat
 
-    def test_darwin_bare_app_open_does_not_require_vision_but_compound_does(self):
+    def test_mac_control_prefers_supported_structured_output_model(self):
+        installed = [{"name": "qwen3.6:27b", "size": 18_000_000_000},
+                     {"name": "qwen3:14b", "size": 9_000_000_000}]
+        with patch.object(server, "models", return_value=installed):
+            self.assertEqual(server.choose_control_model(), "qwen3:14b")
+
+    def test_darwin_bare_app_open_does_not_require_model_but_compound_requires_text_model(self):
         bare_job, bare_chat = self._automation_job("Open Discord")
         with patch.object(server, "models", return_value=[]) as models, \
              patch.object(server, "automation_backend", return_value=macos_automation), \
@@ -247,7 +253,7 @@ class AppContextTests(unittest.TestCase):
              patch.object(macos_automation, "run") as run:
             server.run_job(compound_job, compound_chat, "Open Discord and say hello", [])
         self.assertEqual(compound_job["status"], "failed")
-        self.assertIn("vision model", compound_job["error"])
+        self.assertIn("text model", compound_job["error"])
         models.assert_called_once()
         run.assert_not_called()
 

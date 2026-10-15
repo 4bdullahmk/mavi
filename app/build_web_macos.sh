@@ -4,7 +4,7 @@ set -eu
 APP_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_DIR=$(CDPATH= cd -- "$APP_DIR/.." && pwd)
 VERSION=${MAVI_VERSION:-2.0.1}
-BUILD_NUMBER=${MAVI_BUILD_NUMBER:-35}
+BUILD_NUMBER=${MAVI_BUILD_NUMBER:-42}
 BUILD_ROOT=${MAVI_BUILD_DIR:-${TMPDIR:-/tmp}/mavi-web-build}
 mkdir -p "$BUILD_ROOT"
 BUILD_ROOT=$(CDPATH= cd -- "$BUILD_ROOT" && pwd)
@@ -45,7 +45,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/MaviRuntime" "$CACHE"
   "$APP_DIR/MaviWebApp.swift" "$APP_DIR/MacAutomationHelper.swift" \
   -o "$APP/Contents/MacOS/Mavi" \
   -framework SwiftUI -framework AppKit -framework WebKit \
-  -framework ScreenCaptureKit -framework ApplicationServices -framework ImageIO
+  -framework ApplicationServices
 
 cp "$APP_DIR/Info.plist" "$APP/Contents/Info.plist"
 cp "$APP_DIR/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"

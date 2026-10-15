@@ -1,8 +1,17 @@
 import AppKit
 import ApplicationServices
-import ScreenCaptureKit
-import ImageIO
-import UniformTypeIdentifiers
+
+private struct MaviWindow {
+    let windowID: UInt32
+    let frame: CGRect
+    let title: String?
+    let owningApplication: MaviWindowOwner?
+}
+
+private struct MaviWindowOwner {
+    let processID: pid_t
+    let bundleIdentifier: String
+}
 
 @MainActor
 private enum MacAutomation {
@@ -58,8 +67,7 @@ private enum MacAutomation {
             return ["url": url.absoluteString, "bundle_id": bundle ?? ""]
         case "windows":
             let bundle = try bundleID(input)
-            let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
-            let list = content.windows.filter { $0.owningApplication?.bundleIdentifier == bundle && $0.windowLayer == 0 && $0.frame.width >= 120 && $0.frame.height >= 80 }
+            let list = availableWindows(bundle: bundle)
             return ["windows": list.prefix(20).map { w in
                 ["window_id": Int(w.windowID), "title": String((w.title ?? "Window").prefix(240)),
                  "width": Int(w.frame.width), "height": Int(w.frame.height)]
@@ -81,21 +89,13 @@ private enum MacAutomation {
             try await Task.sleep(nanoseconds: 350_000_000)
             guard isFocused(window, bundle: bundle) else { throw SafeError("The selected window could not be focused. No input was sent.") }
             return ["focused": true, "window_id": Int(window.windowID)]
-        case "capture":
+        case "observe":
             let (bundle, window) = try await resolveWindow(input)
-            guard CGPreflightScreenCaptureAccess() else { throw SafeError("Allow Screen Recording for Mavi in System Settings, then try again.") }
-            let config = SCStreamConfiguration()
-            let scale = min(1.5, 1600 / max(window.frame.width, 1))
-            config.width = max(1, Int(window.frame.width * scale)); config.height = max(1, Int(window.frame.height * scale))
-            config.showsCursor = false; config.ignoreShadowsSingleWindow = true
-            let cg = try await SCScreenshotManager.captureImage(contentFilter: SCContentFilter(desktopIndependentWindow: window), configuration: config)
-            let rep = NSBitmapImageRep(cgImage: cg)
-            guard let data = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.82]), data.count <= 8_000_000 else {
-                throw SafeError("The selected app window screenshot is too large to send to the local model.")
-            }
-            let targets = accessibilityTargets(window: window, bundle: bundle)
-            return ["bundle_id": bundle, "window_id": Int(window.windowID), "title": String((window.title ?? "Window").prefix(240)),
-                    "width": cg.width, "height": cg.height, "image_base64": data.base64EncodedString(), "targets": targets]
+            guard AXIsProcessTrusted() else { throw SafeError("Allow Accessibility for Mavi in System Settings before using computer control.") }
+            return ["bundle_id": bundle, "window_id": Int(window.windowID),
+                    "title": String((window.title ?? "Window").prefix(240)),
+                    "targets": accessibilityTargets(window: window, bundle: bundle),
+                    "text": accessibilityText(window: window, bundle: bundle)]
         case "action":
             let (bundle, window) = try await resolveWindow(input)
             guard AXIsProcessTrusted() else { throw SafeError("Allow Accessibility for Mavi in System Settings before using computer control.") }
@@ -112,11 +112,27 @@ private enum MacAutomation {
         return bundle
     }
 
-    private static func resolveWindow(_ input: [String: Any]) async throws -> (String, SCWindow) {
+    private static func availableWindows(bundle: String) -> [MaviWindow] {
+        guard let raw = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return [] }
+        return raw.compactMap { info -> MaviWindow? in
+            guard let number = info[kCGWindowNumber as String] as? NSNumber,
+                  let pid = info[kCGWindowOwnerPID as String] as? NSNumber,
+                  let layer = info[kCGWindowLayer as String] as? NSNumber, layer.intValue == 0,
+                  let app = NSRunningApplication(processIdentifier: pid.int32Value), app.bundleIdentifier == bundle,
+                  let bounds = info[kCGWindowBounds as String] as? [String: Any],
+                  let frame = CGRect(dictionaryRepresentation: bounds as CFDictionary),
+                  frame.width >= 120, frame.height >= 80 else { return nil }
+            let owner = MaviWindowOwner(processID: pid.int32Value, bundleIdentifier: bundle)
+            let candidate = MaviWindow(windowID: number.uint32Value, frame: frame, title: nil, owningApplication: owner)
+            let title = selectedAXWindow(window: candidate, bundle: bundle).flatMap { stringAttribute($0, kAXTitleAttribute as String) }
+            return MaviWindow(windowID: number.uint32Value, frame: frame, title: title, owningApplication: owner)
+        }
+    }
+
+    private static func resolveWindow(_ input: [String: Any]) async throws -> (String, MaviWindow) {
         let bundle = try bundleID(input)
         guard let raw = input["window_id"] as? Int, raw > 0, raw <= Int(UInt32.max) else { throw SafeError("Select a current window first.") }
-        let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
-        guard let window = content.windows.first(where: { Int($0.windowID) == raw && $0.owningApplication?.bundleIdentifier == bundle && $0.windowLayer == 0 }) else {
+        guard let window = availableWindows(bundle: bundle).first(where: { Int($0.windowID) == raw }) else {
             throw SafeError("The selected window changed or closed. Refresh the window list before continuing.")
         }
         return (bundle, window)
@@ -136,7 +152,7 @@ private enum MacAutomation {
         abs(a.minX-b.minX) < 4 && abs(a.minY-b.minY) < 4 && abs(a.width-b.width) < 4 && abs(a.height-b.height) < 4
     }
 
-    private static func isFocused(_ window: SCWindow, bundle: String) -> Bool {
+    private static func isFocused(_ window: MaviWindow, bundle: String) -> Bool {
         guard let owner = window.owningApplication, owner.bundleIdentifier == bundle,
               NSWorkspace.shared.frontmostApplication?.processIdentifier == owner.processID else { return false }
         var focused: CFTypeRef?
@@ -146,7 +162,8 @@ private enum MacAutomation {
     }
 
     private static let selectableRoles: Set<String> = ["AXCheckBox", "AXRadioButton"]
-    private static let actionableRoles: Set<String> = ["AXLink", "AXButton", "AXMenuItem", "AXCheckBox", "AXRadioButton"]
+    private static let actionableRoles: Set<String> = ["AXLink", "AXButton", "AXMenuItem", "AXCheckBox", "AXRadioButton",
+                                                       "AXTextField", "AXTextArea", "AXComboBox", "AXPopUpButton", "AXTab"]
 
     private static func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
         var value: CFTypeRef?
@@ -167,7 +184,7 @@ private enum MacAutomation {
         (attribute(element, kAXChildrenAttribute as String) as? [AXUIElement]) ?? []
     }
 
-    private static func selectedAXWindow(window: SCWindow, bundle: String) -> AXUIElement? {
+    private static func selectedAXWindow(window: MaviWindow, bundle: String) -> AXUIElement? {
         guard let owner = window.owningApplication, owner.bundleIdentifier == bundle else { return nil }
         let app = AXUIElementCreateApplication(owner.processID)
         guard let windows = attribute(app, kAXWindowsAttribute as String) as? [AXUIElement] else { return nil }
@@ -218,13 +235,13 @@ private enum MacAutomation {
         return parts.url?.absoluteString
     }
 
-    private static func isVisible(_ rect: CGRect, in window: SCWindow) -> Bool {
+    private static func isVisible(_ rect: CGRect, in window: MaviWindow) -> Bool {
         guard rect.width > 0, rect.height > 0, rect.minX.isFinite, rect.minY.isFinite,
               rect.width.isFinite, rect.height.isFinite else { return false }
         let intersection = rect.intersection(window.frame)
         guard !intersection.isNull, intersection.width >= 2, intersection.height >= 2 else { return false }
         return NSScreen.screens.contains { screen in
-            // AX and ScreenCaptureKit use global top-left display coordinates;
+            // AX and CoreGraphics window bounds use global top-left display coordinates;
             // NSScreen.frame uses bottom-left coordinates and can reject every
             // target on a secondary display above or below the main display.
             guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return false }
@@ -243,18 +260,29 @@ private enum MacAutomation {
                 "height": Int(max(0, min(1000, clipped.height / max(window.height, 1) * 1000)).rounded())]
     }
 
-    private static func accessibilityTargets(window: SCWindow, bundle: String) -> [[String: Any]] {
+    private static func accessibilityTargets(window: MaviWindow, bundle: String) -> [[String: Any]] {
         guard let root = selectedAXWindow(window: window, bundle: bundle) else { return [] }
         var results: [[String: Any]] = []
         var visited = 0
         var stack: [(AXUIElement, [Int], Int)] = [(root, [], 0)]
-        while let (element, path, depth) = stack.popLast(), visited < 2500, results.count < 100 {
+        while let (element, path, depth) = stack.popLast(), visited < 2500, results.count < 180 {
             visited += 1
             if let currentRole = role(element), actionableRoles.contains(currentRole),
                let rect = axBounds(element), isVisible(rect, in: window), let label = elementLabel(element), !label.isEmpty {
                 var item: [String: Any] = ["id": path.map(String.init).joined(separator: "."), "role": currentRole,
                                            "label": label, "bounds": normalizedBounds(rect, window: window.frame)]
                 if currentRole == "AXLink", let url = safeLinkURL(element) { item["url"] = url }
+                if ["AXTextField", "AXTextArea"].contains(currentRole),
+                   stringAttribute(element, kAXSubroleAttribute as String) != "AXSecureTextField" {
+                    if let focused = attribute(element, kAXFocusedAttribute as String) as? NSNumber {
+                        item["focused"] = focused.boolValue
+                    }
+                    if let value = stringAttribute(element, kAXValueAttribute as String) {
+                        item["value"] = String(value.suffix(1000))
+                    } else if let value = attribute(element, kAXValueAttribute as String) as? NSAttributedString {
+                        item["value"] = String(value.string.suffix(1000))
+                    }
+                }
                 results.append(item)
             }
             guard depth < 24 else { continue }
@@ -266,7 +294,31 @@ private enum MacAutomation {
         return results
     }
 
-    private static func resolveTarget(_ action: [String: Any], window: SCWindow, bundle: String) throws -> (AXUIElement, CGRect) {
+    private static func accessibilityText(window: MaviWindow, bundle: String) -> [String] {
+        guard let root = selectedAXWindow(window: window, bundle: bundle) else { return [] }
+        var results: [String] = []
+        var seen = Set<String>()
+        var visited = 0
+        var stack: [(AXUIElement, Int)] = [(root, 0)]
+        while let (element, depth) = stack.popLast(), visited < 3000, results.count < 120 {
+            visited += 1
+            if let currentRole = role(element), ["AXStaticText", "AXHeading"].contains(currentRole),
+               let rect = axBounds(element), isVisible(rect, in: window),
+               let raw = stringAttribute(element, kAXValueAttribute as String) ?? stringAttribute(element, kAXTitleAttribute as String) {
+                let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !value.isEmpty, !seen.contains(value) {
+                    seen.insert(value); results.append(String(value.prefix(400)))
+                }
+            }
+            guard depth < 24 else { continue }
+            for child in childElements(element).reversed() where stack.count + visited < 3000 {
+                stack.append((child, depth + 1))
+            }
+        }
+        return results
+    }
+
+    private static func resolveTarget(_ action: [String: Any], window: MaviWindow, bundle: String) throws -> (AXUIElement, CGRect) {
         guard let targetID = action["target_id"] as? String, targetID.count <= 160,
               let expectedRole = action["expected_role"] as? String, actionableRoles.contains(expectedRole),
               let expectedLabel = action["expected_label"] as? String, !expectedLabel.isEmpty, expectedLabel.count <= 180 else {
@@ -302,7 +354,7 @@ private enum MacAutomation {
         return (element, rect)
     }
 
-    private static func perform(kind: String, action: [String: Any], window: SCWindow, bundle: String) throws {
+    private static func perform(kind: String, action: [String: Any], window: MaviWindow, bundle: String) throws {
         let bounds = window.frame
         switch kind {
         case "target":
@@ -324,6 +376,17 @@ private enum MacAutomation {
             let visible = rect.intersection(window.frame)
             let center = CGPoint(x: visible.midX, y: visible.midY)
             postMouse(.mouseMoved, center); postMouse(.leftMouseDown, center); postMouse(.leftMouseUp, center)
+        case "context_target":
+            guard ["com.brave.Browser", "com.google.Chrome", "com.microsoft.edgemac"].contains(bundle),
+                  action["expected_role"] as? String == "AXTab" else {
+                throw SafeError("Right-click requires an observed browser tab.")
+            }
+            let (_, rect) = try resolveTarget(action, window: window, bundle: bundle)
+            let center = CGPoint(x: rect.midX, y: rect.midY)
+            guard center.y <= window.frame.minY + window.frame.height * 0.25 else {
+                throw SafeError("Right-click is limited to the browser tab strip.")
+            }
+            postMouse(.mouseMoved, center); postMouse(.rightMouseDown, center); postMouse(.rightMouseUp, center)
         case "click", "context_click":
             guard let x = action["x"] as? Int, let y = action["y"] as? Int, (0...1000).contains(x), (0...1000).contains(y) else { throw SafeError("Invalid click coordinates.") }
             if kind == "context_click" {
@@ -345,6 +408,7 @@ private enum MacAutomation {
                 down?.keyboardSetUnicodeString(stringLength: chars.count, unicodeString: &chars); down?.post(tap: .cghidEventTap)
                 let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)
                 up?.keyboardSetUnicodeString(stringLength: chars.count, unicodeString: &chars); up?.post(tap: .cghidEventTap)
+                Thread.sleep(forTimeInterval: 0.015)
             }
         case "key":
             guard let key = action["key"] as? String else { throw SafeError("Invalid navigation key.") }

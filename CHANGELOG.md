@@ -1,5 +1,22 @@
 # Mavi changes
 
+## 2.0.1 — accessibility computer control (build 42)
+
+- Use a local text model and visible accessibility controls for Mac computer and Brave research tasks without capturing or sending screenshots.
+- Replace ScreenCaptureKit window metadata with CoreGraphics window IDs and Accessibility titles, so Mac computer control does not depend on Screen Recording access.
+- Permit reviewed switches between supported Mac apps when Whole computer is selected, and reacquire a replaced window before continuing.
+- Keep observed Canvas and courseware links in the browser workflow and require review before graded submission. Live Canvas, McGraw Hill, and Pearson task completion is not yet verified.
+- Make the optional 32B abliterated text model available for chat without changing computer-control permissions.
+- Prefer the installed Qwen3 14B controller because the local Qwen3.6 27B runtime rejects structured action output.
+- Pace native keyboard events and let the controller verify the focused nonsecure field value while withholding likely secret values.
+- Verify exact requested text after typing and stop before a duplicate text action when observation is incomplete.
+- End exact type-and-stop tasks without speculative clicks when an app does not expose the field value; report the verification limit to the user.
+
+## 2.0.1 — browser control correction (build 36)
+
+- In a live Brave run, macOS permissions and window capture worked, but Mavi stopped before navigation because an unrelated checkbox on the public page caused it to reject every coordinate click. Coordinate clicks outside visible checkbox or radio-button bounds can now proceed through the existing action review; clicks on those controls still require an exact accessibility target.
+- Verify the correction with a focused browser-control test. Live tab and group creation is still being checked.
+
 ## 2.0.1 — local Brave research (build 35)
 
 - Let Web research use the existing local vision model and physically browse Brave with no API key when Mac browser control is ready. Keep configured OpenAI research as a fallback when local browser control is unavailable.

@@ -14,6 +14,122 @@ import app_context
 
 
 class MacAutomationTests(unittest.TestCase):
+    def test_exact_text_is_verified_without_second_type_action(self):
+        actions = []
+        observations = iter(["", "Mavi control test"])
+        def helper(payload, **_kwargs):
+            if payload["op"] == "capability": return {"accessibility": True}
+            if payload["op"] == "windows": return {"windows": [{"window_id": 7, "title": "Untitled"}]}
+            if payload["op"] == "observe":
+                return {"bundle_id": "com.apple.TextEdit", "window_id": 7, "title": "Untitled", "text": [],
+                        "targets": [{"id": "0.1", "role": "AXTextArea", "label": "First Text View", "value": next(observations)}]}
+            if payload["op"] == "action": actions.append(payload["action"])
+            return {}
+        proposed = '{"action":"type","text":"Mavi control test","reason":"write the requested phrase","risk":"low"}'
+        context = {"ask": lambda _q: "yes", "call_model": lambda *_a, **_kw: proposed, "no_screenshots": True}
+        with patch.object(mac, "_call_helper", side_effect=helper), patch.object(mac, "_settle_after_action"):
+            result = mac.run("Open TextEdit and type exactly Mavi control test, then stop.", [], context)
+        self.assertIn("verified", result)
+        self.assertEqual(len(actions), 1)
+
+    def test_exact_text_without_readable_value_stops_without_retyping(self):
+        actions = []
+        def helper(payload, **_kwargs):
+            if payload["op"] == "capability": return {"accessibility": True}
+            if payload["op"] == "windows": return {"windows": [{"window_id": 7, "title": "Untitled"}]}
+            if payload["op"] == "observe": return {"bundle_id": "com.apple.TextEdit", "window_id": 7, "title": "Untitled", "text": [], "targets": []}
+            if payload["op"] == "action": actions.append(payload["action"])
+            return {}
+        proposed = '{"action":"type","text":"Mavi control test","reason":"write phrase","risk":"low"}'
+        context = {"ask": lambda _q: "yes", "call_model": lambda *_a, **_kw: proposed, "no_screenshots": True}
+        with patch.object(mac, "_call_helper", side_effect=helper), patch.object(mac, "_settle_after_action"):
+            result = mac.run("Open TextEdit and type exactly Mavi control test, then stop.", [], context)
+        self.assertIn("unavailable for verification", result)
+        self.assertEqual(len(actions), 1)
+
+    def test_focused_editable_value_is_visible_but_secret_value_is_withheld(self):
+        controls = [{"id": "0.1", "role": "AXTextArea", "label": "First Text View", "focused": True,
+                     "value": "Mavi control test"},
+                    {"id": "0.2", "role": "AXTextField", "label": "Email", "focused": True,
+                     "value": "private@example.com"}]
+        shown = mac._model_targets(controls, "verify typing")
+        self.assertEqual(shown[0]["focused_value"], "Mavi control test")
+        self.assertEqual(shown[1]["focused_value"], "[private value withheld]")
+
+    def test_whole_computer_switches_only_after_review(self):
+        proposed = iter([
+            '{"action":"switch_app","app":"textedit","reason":"continue in TextEdit","risk":"low"}',
+            '{"action":"done","text":"TextEdit is open."}',
+        ])
+        calls = []
+        def helper(payload, **_kwargs):
+            calls.append(payload)
+            bundle = payload.get("bundle_id", "com.brave.Browser")
+            if payload["op"] == "capability": return {"accessibility": True, "screen_recording": False}
+            if payload["op"] == "windows": return {"windows": [{"window_id": 7 if bundle == "com.brave.Browser" else 8, "title": "Window"}]}
+            if payload["op"] == "observe": return {"bundle_id": bundle, "window_id": payload["window_id"], "title": "Window", "targets": [], "text": []}
+            return {}
+        context = {"ask": lambda _q: "yes", "call_model": lambda *_a, **_kw: next(proposed),
+                   "no_screenshots": True, "automation_scope": "whole_computer"}
+        with patch.object(mac, "_call_helper", side_effect=helper):
+            result = mac.run("Open Brave and continue with the task", [], context, browser=True)
+        self.assertIn("TextEdit", result)
+        self.assertEqual([c["bundle_id"] for c in calls if c["op"] == "observe"], ["com.brave.Browser", "com.apple.TextEdit"])
+        self.assertNotIn("capture", [c["op"] for c in calls])
+
+    def test_switch_app_refused_in_single_app_scope(self):
+        proposed = '{"action":"switch_app","app":"textedit","reason":"switch","risk":"low"}'
+        def helper(payload, **_kwargs):
+            if payload["op"] == "capability": return {"accessibility": True}
+            if payload["op"] == "windows": return {"windows": [{"window_id": 7, "title": "Window"}]}
+            if payload["op"] == "observe": return {"bundle_id": "com.brave.Browser", "window_id": 7, "targets": [], "text": []}
+            return {}
+        context = {"ask": lambda _q: "yes", "call_model": lambda *_a, **_kw: proposed,
+                   "no_screenshots": True, "automation_scope": "single_app"}
+        with patch.object(mac, "_call_helper", side_effect=helper):
+            with self.assertRaisesRegex(RuntimeError, "Whole computer"):
+                mac.run("Open Brave and research something", [], context, browser=True)
+
+    def test_accessibility_control_uses_no_screenshot_or_screen_permission(self):
+        calls, prompts = [], []
+        target = {"id": "0.3", "role": "AXLink", "label": "Accounting assignment", "url": "https://canvas.gmu.edu/assignment"}
+        outputs = iter([
+            json.dumps({"action": "target", "target_id": "0.3", "reason": "Open the assignment link", "risk": "low"}),
+            json.dumps({"action": "done", "text": "Assignment page is open."}),
+        ])
+        def helper(payload, **_kwargs):
+            calls.append(payload["op"])
+            if payload["op"] == "capability": return {"accessibility": True, "screen_recording": False}
+            if payload["op"] == "windows": return {"windows": [{"window_id": 7, "title": "Canvas"}]}
+            if payload["op"] == "observe":
+                return {"bundle_id": "com.brave.Browser", "window_id": 7, "title": "Canvas",
+                        "targets": [target], "text": ["Accounting course", "Assignment"]}
+            return {}
+        def model(messages, **_kwargs):
+            prompts.append(messages)
+            self.assertTrue(all("images" not in message for message in messages))
+            return next(outputs)
+        context = {"ask": lambda _q: "yes", "call_model": model, "no_screenshots": True,
+                   "automation_policy": "routine_navigation"}
+        with patch.object(mac, "_call_helper", side_effect=helper), patch.object(mac, "_settle_after_action"):
+            result = mac.run("Open Brave and find my Accounting assignment", [], context, browser=True)
+        self.assertIn("Assignment page", result)
+        self.assertEqual(calls.count("observe"), 2)
+        self.assertNotIn("capture", calls)
+        self.assertIn("Accounting course", prompts[0][-1]["content"])
+
+    def test_accessibility_control_rejects_coordinate_click(self):
+        def helper(payload, **_kwargs):
+            if payload["op"] == "capability": return {"accessibility": True, "screen_recording": False}
+            if payload["op"] == "windows": return {"windows": [{"window_id": 7, "title": "Canvas"}]}
+            if payload["op"] == "observe": return {"bundle_id": "com.brave.Browser", "window_id": 7, "targets": [], "text": []}
+            return {}
+        context = {"ask": lambda _q: "yes", "call_model": lambda *_a, **_kw: '{"action":"click","x":5,"y":5,"reason":"guess"}',
+                   "no_screenshots": True}
+        with patch.object(mac, "_call_helper", side_effect=helper):
+            with self.assertRaisesRegex(RuntimeError, "coordinate click without a screenshot"):
+                mac.run("Open Brave and find my assignment", [], context, browser=True)
+
     def test_local_brave_research_can_search_and_manage_tabs_with_bounded_review(self):
         proposals = iter([
             '{"action":"search","query":"public labor statistics","reason":"research public data","risk":"low"}',
@@ -335,6 +451,34 @@ class MacAutomationTests(unittest.TestCase):
                 mac.run("Open Brave and choose Net income", [], context, browser=True)
         self.assertEqual(len(model_calls), 2)
         self.assertEqual(actions, [])
+
+    def test_public_page_click_outside_visible_checkbox_can_navigate(self):
+        actions = []
+        outputs = iter([
+            json.dumps({"action": "click", "x": 100, "y": 100, "reason": "Open the page menu", "risk": "low"}),
+            json.dumps({"action": "done", "text": "Page menu opened."}),
+        ])
+        checkbox = {"id": "0.3", "role": "AXCheckBox", "label": "Subscribe to updates",
+                    "bounds": {"x": 400, "y": 600, "width": 100, "height": 30}}
+        def helper(payload, **_kwargs):
+            if payload["op"] == "windows": return {"windows": [{"window_id": 7, "title": "NASA"}]}
+            if payload["op"] == "capture":
+                return {"bundle_id": "com.brave.Browser", "window_id": 7,
+                        "image_base64": base64.b64encode(b"public page").decode(), "targets": [checkbox]}
+            if payload["op"] == "action": actions.append(payload["action"])
+            return {}
+        context = {"ask": lambda _q: "yes", "call_model": lambda *_a, **_kw: next(outputs),
+                   "automation_policy": "routine_navigation"}
+        with patch.object(mac, "_call_helper", side_effect=helper), patch.object(mac, "_settle_after_action"):
+            result = mac.run("Open Brave and research NASA", [], context, browser=True)
+        self.assertEqual(result, "Page menu opened.")
+        self.assertEqual(actions[0]["kind"], "click")
+
+    def test_coordinate_click_inside_checkbox_still_needs_exact_target(self):
+        checkbox = {"id": "0.3", "role": "AXCheckBox", "label": "Subscribe to updates",
+                    "bounds": {"x": 400, "y": 600, "width": 100, "height": 30}}
+        self.assertTrue(mac._click_hits_selectable({"x": 450, "y": 610}, [checkbox]))
+        self.assertFalse(mac._click_hits_selectable({"x": 100, "y": 100}, [checkbox]))
 
     def test_follow_up_preserves_latest_instruction_after_long_prior_context(self):
         prior = "Prior task: stop when the assignment page is visible; do not review the practice material. " + ("old background context. " * 80)

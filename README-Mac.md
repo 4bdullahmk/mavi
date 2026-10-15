@@ -29,7 +29,7 @@ The public source build is signed locally for integrity checks but is not notari
 
 Mavi's server binds to `127.0.0.1` only and its web UI uses a per-launch session cookie. Model requests go to the local Ollama service. Discord is optional and uses each user's own bot configuration. Discord tokens are entered in the dedicated local field and remain in memory only for that launch; do not paste them into chat or a terminal.
 
-Browser links that leave Mavi open in your default browser. Website login information remains in that browser's normal profile. Mavi does not copy browser cookies. Computer assistance may require macOS Screen Recording and Accessibility permission; review the requested permissions and enable them only if you choose that feature. Mavi does not silently install permissions or grant access.
+Browser links that leave Mavi open in your default browser. Website login information remains in that browser's normal profile. Mavi does not copy browser cookies. Mac computer assistance reads accessibility controls and page text without capturing screenshots. It requires Accessibility permission; review the requested permission and enable it only if you choose that feature. Mavi does not silently install permissions or grant access.
 
 The standalone web client is a separate implementation from the native SwiftUI client. It does not claim complete parity with every native Mac feature. Windows behavior and Mac package installation must be checked on their target machines before calling those releases fully qualified.
 
@@ -38,7 +38,7 @@ The standalone web client is a separate implementation from the native SwiftUI c
 From the repository root on Apple Silicon with Xcode Command Line Tools installed:
 
 ```sh
-MAVI_VERSION=2.0.1 MAVI_BUILD_NUMBER=34 ./app/build_web_macos.sh
+MAVI_VERSION=2.0.1 MAVI_BUILD_NUMBER=42 ./app/build_web_macos.sh
 ```
 
 The build creates an ad-hoc signed app under a temporary build directory and a versioned ZIP plus SHA-256 sidecar in `app/dist/`. Set `MAVI_SIGN_IDENTITY` to an existing signing identity if you have one. A Developer ID signature and notarization are needed for the standard trusted-download experience.
