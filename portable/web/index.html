@@ -115,7 +115,7 @@
               <fieldset class="automation-approval hidden" id="automation-approval" aria-describedby="automation-approval-note">
                 <legend>Action approvals</legend>
                 <label class="automation-policy-row" for="automation-policy"><span>Choose how often Mavi asks</span><select id="automation-policy" name="automation-policy"><option value="ask_each">Ask before every action</option><option value="routine_navigation">Handle routine navigation</option></select></label>
-                <p id="automation-approval-note">Routine navigation covers low-risk scrolling and ordinary links, tabs, or menus. Mavi still asks before typing, sending, saving, or changing data or security. This preference is saved on this device.</p>
+                <p id="automation-approval-note">Routine navigation covers low-risk scrolling, ordinary links and tabs, and public search queries in Brave research after task approval. Mavi still asks before typing into pages, sending, saving, changing data, or changing security. This preference is saved on this device.</p>
               </fieldset>
               <fieldset class="automation-approval hidden" id="automation-scope" aria-describedby="automation-scope-note">
                 <legend>Window scope · this task</legend>
@@ -150,7 +150,7 @@
             <label class="online-field">Inference mode<select id="online-mode"><option value="local">Local only (default)</option><option value="hybrid">Hybrid: online routes with local fallback</option></select></label>
             <div class="online-disclosure" id="online-disclosure">
               <strong>Before enabling hybrid</strong>
-              <p>Hybrid mode tries your configured online routes first for eligible text tasks and uses local inference when routes are unavailable. The current task text, conversation context, saved preference profile, and attached text excerpts may be sent to those providers. Web research sends only its text request to OpenAI and uses live web search; it needs an OpenAI API key and may incur model and search charges. Screenshots and computer-control content stay local. Discord uses local inference in this setup. Provider usage and quotas are controlled by each provider; routes do not mean unlimited usage. OpenRouter is restricted to free models in this setup.</p>
+              <p>Hybrid mode tries your configured online routes first for eligible text tasks and uses local inference when routes are unavailable. The current task text, conversation context, saved preference profile, and attached text excerpts may be sent to those providers. Web research uses Brave and a local vision model when browser control is ready, without an API key. If Brave control is unavailable, a configured OpenAI research route may be used and may incur charges. Browser searches send queries to your configured search engine. Screenshots and computer-control content stay local. Discord uses local inference in this setup. Provider usage and quotas are controlled by each provider; routes do not mean unlimited usage. OpenRouter is restricted to free models in this setup.</p>
               <label class="online-consent"><input id="online-consent" type="checkbox"><span>I understand that eligible task text, context, saved preferences, and attached text may be sent to the configured online providers.</span></label>
             </div>
             <div class="online-provider-row">

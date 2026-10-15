@@ -1,5 +1,12 @@
 # Mavi changes
 
+## 2.0.1 — local Brave research (build 35)
+
+- Let Web research use the existing local vision model and physically browse Brave with no API key when Mac browser control is ready. Keep configured OpenAI research as a fallback when local browser control is unavailable.
+- Add verified browser tab shortcuts, a Brave search action, and a reviewed right-click action for visible tab-group menus. Research tasks can take up to 60 observed steps, with Stop available throughout.
+- Show observed HTTPS link targets to the local model for source reporting. Keep private sign-ins, assignment source rules, and review before graded submission.
+- A real Brave research run requires macOS Screen Recording and Accessibility permission and has not yet been verified in this build.
+
 ## 2.0.1 — live web research (build 34)
 
 - Add an opt-in Web research workspace using an OpenAI route and the Responses API live web-search tool. Require a performed search and cited HTTPS result before reporting success.

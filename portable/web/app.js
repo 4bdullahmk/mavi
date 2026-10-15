@@ -37,7 +37,7 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
   const modes = [
     { id: "auto", name: "Automatic", icon: "M", cap: "auto", description: "Let Mavi choose the right local workspace" },
     { id: "chat", name: "Chat", icon: "◌", cap: "chat", description: "Ask questions and work through ideas" },
-    { id: "research", name: "Web research", icon: "⌕", cap: "research", description: "Search the live web and cite sources" },
+    { id: "research", name: "Web research", icon: "⌕", cap: "research", description: "Research in Brave using your local model" },
     { id: "workers", name: "Agent team", icon: "⋮", cap: "workers", description: "Independent local analysts and a shared review" },
     { id: "developer", name: "Developer", icon: "⌘", cap: "developer", description: "Inspect and update a code project" },
     { id: "files", name: "Files", icon: "▤", cap: "files", description: "Create or edit workspace files" },
@@ -357,7 +357,7 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     const scopeFieldset = $("#automation-scope");
     const details = $("#automation-control-details");
     if (!fieldset || !policySelect || !scopeFieldset || !details) return;
-    const visible = !activeJob && ["auto", "browser", "computer"].includes(currentMode) && capabilityFor("computer").available;
+    const visible = !activeJob && ["auto", "research", "browser", "computer"].includes(currentMode) && capabilityFor("computer").available;
     details.classList.toggle("hidden", !visible);
     fieldset.classList.toggle("hidden", !visible);
     scopeFieldset.classList.toggle("hidden", !visible);

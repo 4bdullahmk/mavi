@@ -16,9 +16,21 @@ sys.path.insert(0, str(ROOT / "portable"))
 import app_context
 import server
 import macos_automation
+REAL_CAPABILITIES = server.capabilities
 
 
 class AppContextTests(unittest.TestCase):
+    def test_research_prefers_free_brave_when_local_vision_is_ready(self):
+        online = {"mode": "hybrid", "routes": [{"provider": "openai", "roles": ["research"], "ready": True}]}
+        helper = SimpleNamespace(capability=lambda: {"available": True, "reason": ""})
+        with patch.object(server, "models", return_value=[{"name": "qwen3-vl:8b-instruct"}]), \
+             patch.object(server, "automation_backend", return_value=helper), \
+             patch.object(server, "capabilities", REAL_CAPABILITIES), \
+             patch.object(server.ONLINE, "snapshot", return_value=online):
+            self.assertEqual(server.capabilities()["research"]["backend"], "brave")
+            job = {"_model": "qwen3:4b", "_cancel": threading.Event(), "_app_context": None}
+            self.assertEqual(server.route_task("Search the web for recent reports", [], job), "research")
+
     def test_course_platform_requests_route_to_browser_without_model_router(self):
         job = {"_model": "qwen3:4b", "_cancel": threading.Event(), "_app_context": None}
         requests = (

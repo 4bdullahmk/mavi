@@ -208,6 +208,16 @@ private enum MacAutomation {
         return String(label.prefix(180))
     }
 
+    private static func safeLinkURL(_ element: AXUIElement) -> String? {
+        guard let raw = attribute(element, kAXURLAttribute as String) else { return nil }
+        let value = (raw as? URL)?.absoluteString ?? (raw as? String)
+        guard let value, value.count <= 2048, var parts = URLComponents(string: value),
+              parts.scheme?.lowercased() == "https", let host = parts.host, !host.isEmpty,
+              parts.user == nil, parts.password == nil else { return nil }
+        parts.query = nil; parts.fragment = nil
+        return parts.url?.absoluteString
+    }
+
     private static func isVisible(_ rect: CGRect, in window: SCWindow) -> Bool {
         guard rect.width > 0, rect.height > 0, rect.minX.isFinite, rect.minY.isFinite,
               rect.width.isFinite, rect.height.isFinite else { return false }
@@ -242,8 +252,10 @@ private enum MacAutomation {
             visited += 1
             if let currentRole = role(element), actionableRoles.contains(currentRole),
                let rect = axBounds(element), isVisible(rect, in: window), let label = elementLabel(element), !label.isEmpty {
-                results.append(["id": path.map(String.init).joined(separator: "."), "role": currentRole,
-                                "label": label, "bounds": normalizedBounds(rect, window: window.frame)])
+                var item: [String: Any] = ["id": path.map(String.init).joined(separator: "."), "role": currentRole,
+                                           "label": label, "bounds": normalizedBounds(rect, window: window.frame)]
+                if currentRole == "AXLink", let url = safeLinkURL(element) { item["url"] = url }
+                results.append(item)
             }
             guard depth < 24 else { continue }
             let children = childElements(element)
@@ -312,10 +324,17 @@ private enum MacAutomation {
             let visible = rect.intersection(window.frame)
             let center = CGPoint(x: visible.midX, y: visible.midY)
             postMouse(.mouseMoved, center); postMouse(.leftMouseDown, center); postMouse(.leftMouseUp, center)
-        case "click":
+        case "click", "context_click":
             guard let x = action["x"] as? Int, let y = action["y"] as? Int, (0...1000).contains(x), (0...1000).contains(y) else { throw SafeError("Invalid click coordinates.") }
+            if kind == "context_click" {
+                guard ["com.brave.Browser", "com.google.Chrome", "com.microsoft.edgemac"].contains(bundle), y <= 250 else {
+                    throw SafeError("Right-click is limited to a supported browser's tab strip.")
+                }
+            }
             let point = CGPoint(x: bounds.minX + bounds.width * CGFloat(x) / 1000, y: bounds.minY + bounds.height * CGFloat(y) / 1000)
-            postMouse(.mouseMoved, point); postMouse(.leftMouseDown, point); postMouse(.leftMouseUp, point)
+            postMouse(.mouseMoved, point)
+            if kind == "context_click" { postMouse(.rightMouseDown, point); postMouse(.rightMouseUp, point) }
+            else { postMouse(.leftMouseDown, point); postMouse(.leftMouseUp, point) }
         case "type":
             guard let text = action["text"] as? String, text.count <= 1000,
                   !text.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { throw SafeError("Typed text is invalid or too long.") }
@@ -329,10 +348,34 @@ private enum MacAutomation {
             }
         case "key":
             guard let key = action["key"] as? String else { throw SafeError("Invalid navigation key.") }
-            let codes: [String: (CGKeyCode, CGEventFlags)] = ["TAB":(48,[]), "SHIFT+TAB":(48,.maskShift), "ENTER":(36,[]), "ESC":(53,[]), "UP":(126,[]), "DOWN":(125,[]), "LEFT":(123,[]), "RIGHT":(124,[]), "HOME":(115,[]), "END":(119,[]), "PAGEUP":(116,[]), "PAGEDOWN":(121,[])]
+            let codes: [String: (CGKeyCode, CGEventFlags)] = ["TAB":(48,[]), "SHIFT+TAB":(48,.maskShift), "ENTER":(36,[]), "ESC":(53,[]), "UP":(126,[]), "DOWN":(125,[]), "LEFT":(123,[]), "RIGHT":(124,[]), "HOME":(115,[]), "END":(119,[]), "PAGEUP":(116,[]), "PAGEDOWN":(121,[]), "CMD+T":(17,.maskCommand), "CMD+L":(37,.maskCommand), "CTRL+TAB":(48,.maskControl), "CTRL+SHIFT+TAB":(48,[.maskControl,.maskShift])]
             guard let (code, flags) = codes[key.uppercased()] else { throw SafeError("That key is not allowed.") }
+            if key.uppercased().hasPrefix("CMD+") || key.uppercased().hasPrefix("CTRL+") {
+                guard ["com.brave.Browser", "com.google.Chrome", "com.microsoft.edgemac", "com.apple.Safari", "org.mozilla.firefox"].contains(bundle) else { throw SafeError("Tab shortcuts are limited to supported browsers.") }
+            }
             let down = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: true), up = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: false)
             down?.flags = flags; up?.flags = flags; down?.post(tap: .cghidEventTap); up?.post(tap: .cghidEventTap)
+        case "search":
+            guard bundle == "com.brave.Browser", let query = action["query"] as? String,
+                  !query.isEmpty, query.count <= 200,
+                  !query.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+                throw SafeError("Only a short Brave search query is allowed.")
+            }
+            for (code, flags) in [(CGKeyCode(37), CGEventFlags.maskCommand)] {
+                let down = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: true), up = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: false)
+                down?.flags = flags; up?.flags = flags; down?.post(tap: .cghidEventTap); up?.post(tap: .cghidEventTap)
+            }
+            for character in query {
+                guard isFocused(window, bundle: bundle) else { throw SafeError("Focus changed while searching. Mavi stopped immediately.") }
+                var chars = Array(String(character).utf16)
+                let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true)
+                down?.keyboardSetUnicodeString(stringLength: chars.count, unicodeString: &chars); down?.post(tap: .cghidEventTap)
+                let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)
+                up?.keyboardSetUnicodeString(stringLength: chars.count, unicodeString: &chars); up?.post(tap: .cghidEventTap)
+            }
+            guard isFocused(window, bundle: bundle) else { throw SafeError("Focus changed before the search was sent.") }
+            CGEvent(keyboardEventSource: nil, virtualKey: 36, keyDown: true)?.post(tap: .cghidEventTap)
+            CGEvent(keyboardEventSource: nil, virtualKey: 36, keyDown: false)?.post(tap: .cghidEventTap)
         case "scroll":
             guard let direction = action["direction"] as? String, ["up", "down"].contains(direction),
                   let amount = action["amount"] as? Int, (1...1200).contains(amount) else { throw SafeError("Invalid scroll request.") }
@@ -344,7 +387,7 @@ private enum MacAutomation {
     }
 
     private static func postMouse(_ type: CGEventType, _ point: CGPoint) {
-        let button: CGMouseButton = type == .leftMouseDown || type == .leftMouseUp ? .left : .left
+        let button: CGMouseButton = type == .rightMouseDown || type == .rightMouseUp ? .right : .left
         CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: button)?.post(tap: .cghidEventTap)
     }
 }

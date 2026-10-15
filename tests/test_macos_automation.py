@@ -14,6 +14,39 @@ import app_context
 
 
 class MacAutomationTests(unittest.TestCase):
+    def test_local_brave_research_can_search_and_manage_tabs_with_bounded_review(self):
+        proposals = iter([
+            '{"action":"search","query":"public labor statistics","reason":"research public data","risk":"low"}',
+            '{"action":"key","key":"CMD+T","reason":"open another research tab","risk":"low"}',
+            '{"action":"context_click","x":120,"y":55,"reason":"visible tab group menu","risk":"low"}',
+            '{"action":"done","text":"Two tabs are open; grouping needs visual confirmation."}',
+        ])
+        actions, approvals = [], []
+        def helper(payload, **_kwargs):
+            if payload["op"] == "open_app": return {"bundle_id": "com.brave.Browser", "name": "Brave"}
+            if payload["op"] == "windows": return {"windows": [{"window_id": 7, "title": "Brave"}]}
+            if payload["op"] == "capture":
+                return {"bundle_id": "com.brave.Browser", "window_id": 7,
+                        "image_base64": base64.b64encode(b"screen").decode(), "targets": []}
+            if payload["op"] == "action": actions.append(payload["action"])
+            return {"screen_recording": True, "accessibility": True}
+        context = {"ask": lambda question: approvals.append(question) or "yes",
+                   "call_model": lambda *_a, **_kw: next(proposals), "browser_research": True,
+                   "automation_policy": "routine_navigation", "screen_access_approved": True}
+        with patch.object(mac, "_call_helper", side_effect=helper), patch.object(mac, "_settle_after_action"):
+            mac.run("Open Brave and research a public topic", [], context, browser=True)
+        self.assertEqual([action["kind"] for action in actions], ["search", "key", "context_click"])
+        self.assertEqual(len(approvals), 2)  # Task consent and visible tab right-click; public search is covered by task consent.
+
+    def test_research_controls_reject_private_queries_and_page_right_clicks(self):
+        with self.assertRaises(ValueError):
+            mac._validate_action('{"action":"search","query":"line one\\nline two","reason":"public search"}')
+        with self.assertRaises(ValueError):
+            mac._validate_action('{"action":"context_click","x":100,"y":600,"reason":"page content"}')
+        self.assertFalse(mac._routine_navigation_action(
+            {"action": "search", "query": "password reset code", "risk": "low"},
+            {"browser_research": True, "automation_policy": "routine_navigation"}))
+
     def test_concise_smartbook_requests_enable_only_full_practice_scope(self):
         self.assertTrue(mac._continuous_smartbook_practice_requested("Do my SmartBook practice"))
         self.assertTrue(mac._continuous_smartbook_practice_requested("Work through SmartBook Recharge"))
