@@ -25,7 +25,7 @@ const snapshot = (config, configuredProviders = []) => ({
   config,
   mode: config.mode,
   routes: config.routes.map((route) => ({ ...route, key_configured: configuredProviders.includes(route.provider), cooldown_seconds: 0, auth_blocked: false, ready: configuredProviders.includes(route.provider) })),
-  providers: ["nvidia", "openrouter", "groq", "google", "gateway"].map((id) => ({
+  providers: ["nvidia", "openai", "openrouter", "groq", "google", "gateway"].map((id) => ({
     id, name: id, configured: configuredProviders.includes(id), key_configured: configuredProviders.includes(id),
     auth_blocked: false, cooldown_seconds: 0, status: configuredProviders.includes(id) ? "Ready" : "Not configured"
   })),
@@ -151,7 +151,7 @@ const snapshot = (config, configuredProviders = []) => ({
     });
     assert.equal(catalogFlow.catalogLoaded, true);
     assert.equal(catalogFlow.firstModel, "nvidia/test-chat");
-    assert.deepEqual(catalogFlow.roleCheckboxValues, ["chat", "analysis", "code", "files"]);
+    assert.deepEqual(catalogFlow.roleCheckboxValues, ["chat", "analysis", "code", "files", "research"]);
     assert.deepEqual(catalogFlow.catalogCall.body, { provider: "nvidia" });
     assert.deepEqual(catalogFlow.temporaryConfigure.body.config.routes, []);
     assert.equal(catalogFlow.temporaryConfigure.body.consent, true);

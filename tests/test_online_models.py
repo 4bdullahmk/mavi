@@ -40,6 +40,60 @@ class OnlineRouterTests(unittest.TestCase):
             router.complete([{"role": "user", "content": "hello"}])
         router._request_json.assert_not_called()
 
+    def test_web_research_uses_live_search_and_keeps_inline_https_citations(self):
+        router = self.make_router(
+            [{"provider": "openai", "model": "gpt-6.1-sol", "roles": ["research"]}],
+            keys={"openai": "memory-only-test-key"},
+        )
+        response = {"output": [
+            {"type": "web_search_call", "action": {"type": "search"}},
+            {"type": "message", "content": [{"type": "output_text", "text": "A current fact [1]", "annotations": [
+                {"type": "url_citation", "start_index": 15, "end_index": 18,
+                 "url": "https://example.com/source", "title": "Example source"}
+            ]}]},
+        ], "usage": {"input_tokens": 20, "output_tokens": 10}}
+        router._request_json = Mock(return_value=response)
+        answer = router.complete([{"role": "user", "content": "Find a current fact"}], role="research")
+        args = router._request_json.call_args.args
+        self.assertEqual(args[1], "https://api.openai.com/v1/responses")
+        self.assertEqual(args[2]["tools"], [{"type": "web_search", "external_web_access": True}])
+        self.assertEqual(args[2]["tool_choice"], "required")
+        self.assertIn("[1] (https://example.com/source)", answer["text"])
+        self.assertNotIn("memory-only-test-key", repr(answer))
+
+    def test_web_research_rejects_uncited_or_unsearched_answers(self):
+        router = self.make_router(
+            [{"provider": "openai", "model": "gpt-6.1-sol", "roles": ["research"]}],
+            keys={"openai": "memory-only-test-key"},
+        )
+        for output in ([{"type": "message", "content": [{"type": "output_text", "text": "Unsearched"}]}],
+                       [{"type": "web_search_call"}, {"type": "message", "content": [{"type": "output_text", "text": "Uncited"}]}]):
+            with self.subTest(output=output):
+                router._request_json = Mock(return_value={"output": output})
+                with self.assertRaises(OnlineUnavailable):
+                    router.complete([{"role": "user", "content": "Research this"}], role="research")
+
+    def test_web_research_role_is_openai_only(self):
+        router = OnlineRouter()
+        with self.assertRaisesRegex(ValueError, "requires an OpenAI route"):
+            router.configure({"mode": "hybrid", "routes": [
+                {"provider": "groq", "model": "example", "roles": ["research"]}
+            ]})
+
+    def test_openai_chat_uses_responses_without_search(self):
+        router = self.make_router(
+            [{"provider": "openai", "model": "gpt-6.1-sol", "roles": ["chat"]}],
+            keys={"openai": "memory-only-test-key"},
+        )
+        router._request_json = Mock(return_value={"output": [
+            {"type": "message", "content": [{"type": "output_text", "text": "Hello"}]}
+        ]})
+        answer = router.complete([{"role": "user", "content": "Hello"}])
+        args = router._request_json.call_args.args
+        self.assertEqual(args[1], "https://api.openai.com/v1/responses")
+        self.assertNotIn("tools", args[2])
+        self.assertEqual(answer["text"], "Hello")
+
     def test_provider_status_supports_saving_key_before_route_selection(self):
         router = OnlineRouter()
         router.configure({"mode": "local", "routes": []}, keys={"groq": "memory-only"})

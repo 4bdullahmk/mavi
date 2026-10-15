@@ -109,6 +109,10 @@ appSource = appSource.replace(startup, `  window.__penguinTest = {
     assert.ok(dragged.saved.x <= 0.01 && dragged.saved.y >= 0.99, "drag position is saved as normalized coordinates");
 
     await page.setViewportSize({ width: 500, height: 420 });
+    await page.waitForFunction(() => {
+      const rect = document.querySelector("#penguin-dock").getBoundingClientRect();
+      return rect.right <= innerWidth + 1 && rect.bottom <= innerHeight + 1;
+    });
     const resized = await page.locator("#penguin-dock").boundingBox();
     assert.ok(resized.x >= 0 && resized.y >= 0 && resized.x + resized.width <= 501 && resized.y + resized.height <= 421,
       `saved normalized position remains bounded after resize: ${JSON.stringify(resized)}`);

@@ -20,13 +20,14 @@ from email.utils import parsedate_to_datetime
 from typing import Any
 
 PROVIDERS: dict[str, str] = {
+    "openai": "https://api.openai.com/v1",
     "nvidia": "https://integrate.api.nvidia.com/v1",
     "openrouter": "https://openrouter.ai/api/v1",
     "groq": "https://api.groq.com/openai/v1",
     "google": "https://generativelanguage.googleapis.com/v1beta/openai",
 }
 GATEWAY = "gateway"
-ALLOWED_ROLES = frozenset({"chat", "analysis", "code", "files"})
+ALLOWED_ROLES = frozenset({"chat", "analysis", "code", "files", "research"})
 _MAX_ROUTES = 8
 _MAX_BODY_BYTES = 4 * 1024 * 1024
 _MAX_INPUT_CHARS = 512 * 1024
@@ -123,6 +124,7 @@ class OnlineRouter:
                 })
             provider_status = []
             provider_names = {
+                "openai": "OpenAI",
                 "nvidia": "NVIDIA NIM", "openrouter": "OpenRouter", "groq": "Groq",
                 "google": "Google AI", "gateway": "Local OpenAI-compatible gateway",
             }
@@ -186,7 +188,7 @@ class OnlineRouter:
         """Run one text completion, falling back over at most eight user routes."""
         self._check_cancelled(cancelled)
         if role not in ALLOWED_ROLES:
-            raise ValueError("Online routing is limited to chat, analysis, code, and files roles.")
+            raise ValueError("Online routing is limited to chat, analysis, code, files, and research roles.")
         if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or not 1 <= max_tokens <= _MAX_TOKENS:
             raise ValueError("max_tokens must be between 1 and 16384.")
         with self._lock:
@@ -228,16 +230,29 @@ class OnlineRouter:
                 failures.append("OpenRouter route is not marked as free.")
                 continue
             self._notify(progress, f"Trying configured online route {index} of {len(routes)}.")
-            request_payload = {
-                "model": model,
-                "messages": safe_messages,
-                "max_tokens": max_tokens,
-                "stream": False,
-            }
+            if provider == "openai":
+                request_payload = {
+                    "model": model,
+                    "input": safe_messages,
+                    "max_output_tokens": max_tokens,
+                }
+                if role == "research":
+                    request_payload["tools"] = [{"type": "web_search", "external_web_access": True}]
+                    request_payload["tool_choice"] = "required"
+                endpoint = base + "/responses"
+            else:
+                request_payload = {
+                    "model": model,
+                    "messages": safe_messages,
+                    "max_tokens": max_tokens,
+                    "stream": False,
+                }
+                endpoint = base + "/chat/completions"
             try:
-                payload = self._request_json(provider, base + "/chat/completions", request_payload, key, cancelled)
+                payload = self._request_json(provider, endpoint, request_payload, key, cancelled)
                 self._check_cancelled(cancelled)
-                text = self._response_text(payload)
+                text = (self._research_text(payload) if role == "research" else
+                        self._responses_text(payload) if provider == "openai" else self._response_text(payload))
                 usage = self._safe_usage(payload.get("usage") if isinstance(payload, dict) else None)
                 self._notify(progress, "Online response received.")
                 return {"text": text, "provider": provider, "model": model, "usage": usage}
@@ -288,6 +303,8 @@ class OnlineRouter:
                 raise ValueError("A route cannot repeat a role.")
             if provider == "openrouter" and not allow_paid and not OnlineRouter._is_openrouter_free_model(model):
                 raise ValueError("OpenRouter routes must use a model marked :free unless allow_paid is explicitly enabled.")
+            if "research" in roles and provider != "openai":
+                raise ValueError("Web research requires an OpenAI route with built-in web search.")
             routes.append({"provider": provider, "model": model.strip(), "roles": list(roles)})
             providers_used.add(provider)
         if "gateway" in providers_used:
@@ -364,7 +381,8 @@ class OnlineRouter:
             headers["Authorization"] = f"Bearer {key}"
         request = urllib.request.Request(url, data=data, headers=headers, method="GET" if data is None else "POST")
         try:
-            with self._opener.open(request, timeout=_TIMEOUT_SECONDS) as response:
+            timeout = 120 if provider == "openai" and url.endswith("/responses") else _TIMEOUT_SECONDS
+            with self._opener.open(request, timeout=timeout) as response:
                 self._check_cancelled(cancelled)
                 body = response.read(_MAX_BODY_BYTES + 1)
                 if len(body) > _MAX_BODY_BYTES:
@@ -422,6 +440,56 @@ class OnlineRouter:
         if not isinstance(text, str) or not text:
             raise OnlineModelError("Provider returned no text response.")
         return text[:_MAX_BODY_BYTES]
+
+    @staticmethod
+    def _research_text(payload: dict[str, Any]) -> str:
+        """Keep only cited web answers; show HTTPS sources as clickable text URLs."""
+        output = payload.get("output")
+        if not isinstance(output, list) or not any(
+            isinstance(item, dict) and item.get("type") == "web_search_call" for item in output
+        ):
+            raise OnlineModelError("The provider did not perform a web search.")
+        pieces = []
+        cited = False
+        for item in output:
+            if not isinstance(item, dict) or item.get("type") != "message":
+                continue
+            for part in item.get("content", []):
+                if not isinstance(part, dict) or part.get("type") != "output_text" or not isinstance(part.get("text"), str):
+                    continue
+                value = part["text"]
+                annotations = []
+                for annotation in part.get("annotations", []):
+                    if not isinstance(annotation, dict) or annotation.get("type") != "url_citation":
+                        continue
+                    url = annotation.get("url")
+                    if not isinstance(url, str) or len(url) > 2048:
+                        continue
+                    parsed = urllib.parse.urlsplit(url)
+                    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+                        continue
+                    start, end = annotation.get("start_index"), annotation.get("end_index")
+                    if isinstance(start, int) and isinstance(end, int) and 0 <= start < end <= len(value):
+                        annotations.append((start, end, url))
+                for start, end, url in sorted(annotations, reverse=True):
+                    value = value[:start] + value[start:end] + " (" + url + ")" + value[end:]
+                    cited = True
+                pieces.append(value)
+        if not pieces or not cited:
+            raise OnlineModelError("Web research returned no verifiable cited answer.")
+        return "\n\n".join(pieces)[:_MAX_BODY_BYTES]
+
+    @staticmethod
+    def _responses_text(payload: dict[str, Any]) -> str:
+        output = payload.get("output")
+        if not isinstance(output, list):
+            raise OnlineModelError("Provider returned no text response.")
+        pieces = [part["text"] for item in output if isinstance(item, dict) and item.get("type") == "message"
+                  for part in item.get("content", []) if isinstance(part, dict) and part.get("type") == "output_text"
+                  and isinstance(part.get("text"), str)]
+        if not pieces:
+            raise OnlineModelError("Provider returned no text response.")
+        return "\n\n".join(pieces)[:_MAX_BODY_BYTES]
 
     @staticmethod
     def _safe_usage(raw: Any) -> dict[str, int]:

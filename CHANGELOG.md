@@ -1,5 +1,12 @@
 # Mavi changes
 
+## 2.0.1 — live web research (build 34)
+
+- Add an opt-in Web research workspace using an OpenAI route and the Responses API live web-search tool. Require a performed search and cited HTTPS result before reporting success.
+- Display cited source URLs as clickable links in Mavi. Add OpenAI as an online provider while keeping keys in memory for the current run.
+- Keep browser application work under the existing approval and private sign-in controls. An unattended job-application pipeline is not included in this build.
+- API behavior is covered by mocked tests; live OpenAI-key verification is pending.
+
 ## 2.0.1 — New chat context and route guard (build 33)
 
 - Clear the previous chat's browser-context banner when New chat is selected, while keeping context attached to chats reopened from history.

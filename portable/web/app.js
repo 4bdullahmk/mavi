@@ -37,6 +37,7 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
   const modes = [
     { id: "auto", name: "Automatic", icon: "M", cap: "auto", description: "Let Mavi choose the right local workspace" },
     { id: "chat", name: "Chat", icon: "◌", cap: "chat", description: "Ask questions and work through ideas" },
+    { id: "research", name: "Web research", icon: "⌕", cap: "research", description: "Search the live web and cite sources" },
     { id: "workers", name: "Agent team", icon: "⋮", cap: "workers", description: "Independent local analysts and a shared review" },
     { id: "developer", name: "Developer", icon: "⌘", cap: "developer", description: "Inspect and update a code project" },
     { id: "files", name: "Files", icon: "▤", cap: "files", description: "Create or edit workspace files" },
@@ -395,10 +396,11 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
   }
 
   const onlineProviderOptions = [
+    ["openai", "OpenAI"],
     ["nvidia", "NVIDIA"], ["openrouter", "OpenRouter"], ["groq", "Groq"],
     ["google", "Google"], ["gateway", "Local gateway"]
   ];
-  const onlineRoles = [["chat", "Chat"], ["analysis", "Analysis"], ["code", "Code"], ["files", "Files"]];
+  const onlineRoles = [["chat", "Chat"], ["analysis", "Analysis"], ["code", "Code"], ["files", "Files"], ["research", "Web research"]];
 
   function providerName(id) { return onlineProviderOptions.find(([value]) => value === id)?.[1] || String(id || "Provider"); }
   function hasOnlineRoutes() { return onlineRoutesDraft.some((route) => route.model && route.roles.length); }
@@ -533,6 +535,7 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
       for (const [id, name] of onlineRoles) {
         const label = document.createElement("label"); const checkbox = document.createElement("input");
         checkbox.type = "checkbox"; checkbox.value = id; checkbox.dataset.field = "role"; checkbox.checked = route.roles.includes(id);
+        if (id === "research" && route.provider !== "openai") { checkbox.checked = false; checkbox.disabled = true; }
         label.append(checkbox, document.createTextNode(name)); roles.append(label);
       }
       card.append(roles);
@@ -618,6 +621,7 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     const routes = readOnlineRoutes();
     if (routes.length > 8) return setOnlineFeedback("Use no more than eight fallback routes.", true);
     if (routes.some((route) => !route.model || !route.roles.length)) return setOnlineFeedback("Give each route a model ID and at least one task role.", true);
+    if (routes.some((route) => route.roles.includes("research") && route.provider !== "openai")) return setOnlineFeedback("Web research requires an OpenAI route.", true);
     const gatewayURL = $("#online-gateway-url").value.trim();
     if (gatewayURL) {
       let parsed;
@@ -886,7 +890,9 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     label.textContent = isUser ? "You" : (isTaskStatus ? `Task ${statusLabel === "stopped" ? "stopped" : "failed"}` : "Mavi");
     const text = document.createElement("p");
     text.className = "message-content";
-    text.textContent = typeof content === "string" ? content : String(content ?? "");
+    const messageText = typeof content === "string" ? content : String(content ?? "");
+    if (isUser || isTaskStatus) text.textContent = messageText;
+    else appendSafeLinks(text, messageText);
     body.append(label, text);
     if (files.length) {
       const tray = document.createElement("div");
@@ -904,6 +910,29 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     $("#welcome-state").classList.add("hidden");
     scrollToBottom();
     return text;
+  }
+
+  function appendSafeLinks(container, value) {
+    const pattern = /https:\/\/[^\s<>()[\]]+/g;
+    let cursor = 0;
+    for (const match of value.matchAll(pattern)) {
+      const raw = match[0];
+      const url = raw.replace(/[.,;:!?]+$/, "");
+      container.append(document.createTextNode(value.slice(cursor, match.index)));
+      try {
+        const parsed = new URL(url);
+        if (parsed.protocol !== "https:" || parsed.username || parsed.password) throw new Error("unsafe URL");
+        const link = document.createElement("a");
+        link.href = parsed.href;
+        link.textContent = url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.referrerPolicy = "no-referrer";
+        container.append(link);
+      } catch { container.append(document.createTextNode(url)); }
+      cursor = match.index + url.length;
+    }
+    container.append(document.createTextNode(value.slice(cursor)));
   }
 
   function showWelcomeIfEmpty() {
@@ -2232,7 +2261,10 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
     $("#online-add-route").addEventListener("click", () => {
       onlineRoutesDraft = readOnlineRoutes();
       if (onlineRoutesDraft.length >= 8) return;
-      onlineRoutesDraft.push({ provider: $("#online-key-provider").value, model: "", roles: ["chat", "analysis", "code", "files"] });
+      const provider = $("#online-key-provider").value;
+      onlineRoutesDraft.push(provider === "openai"
+        ? { provider, model: "gpt-6.1-sol", roles: ["research"] }
+        : { provider, model: "", roles: ["chat", "analysis", "code", "files"] });
       onlineConfigDirty = true; renderOnlineRoutes(); updateHybridCopy(); renderModelStatus();
     });
     $("#online-routes").addEventListener("input", (event) => {
@@ -2248,7 +2280,8 @@ if (typeof window !== "undefined") window.MaviAudio = Object.freeze({ encodeWav1
       if (event.target.matches("[data-field='provider']")) {
         onlineRoutesDraft = readOnlineRoutes();
         onlineRoutesDraft[index].provider = event.target.value;
-        onlineRoutesDraft[index].model = "";
+        onlineRoutesDraft[index].model = event.target.value === "openai" ? "gpt-6.1-sol" : "";
+        onlineRoutesDraft[index].roles = event.target.value === "openai" ? ["research"] : ["chat", "analysis", "code", "files"];
         onlineCatalogs.delete(index);
         onlineConfigDirty = true; renderOnlineRoutes(); updateHybridCopy(); renderModelStatus();
       } else if (event.target.matches("[data-field='catalog']")) {
